@@ -1,0 +1,14 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf *.pyc *.pyo build
+
+override_dh_install:
+	dh_auto_install
+	dh_install
+	mkdir -p debian/python3-webgame/usr/share/python3-webgame/html/
+	cp -L html/mgrl.js html/diffuse.frag html/simple.vert html/gl-matrix.js debian/python3-webgame/usr/share/python3-webgame/html/

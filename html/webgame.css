@@ -1,0 +1,62 @@
+body.disconnected {
+	background: red;
+}
+
+.start {
+	background: red;
+}
+
+.running .start {
+	background: green;
+}
+
+.icon {
+	width: 1em;
+	height: 1em;
+}
+
+#state {
+	float: right;
+}
+
+#content {
+	width: 100%;
+	text-align: center;
+}
+
+#connections {
+	clear: both;
+}
+
+.player {
+	color: blue;
+}
+
+#footer {
+	position: fixed;
+	bottom: 0px;
+	width: 95%;
+	left: 2.5%;
+	text-align: center;
+}
+
+#content {
+	margin-bottom: 10em;
+}
+
+#canvas {
+	background: #ffc;
+	width: 100%;
+}
+
+.self {
+	font-weight: bold;
+}
+
+.hidden {
+	display: none;
+}
+
+#leave {
+	float: right;
+}

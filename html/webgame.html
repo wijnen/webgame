@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset='utf-8'/>
+		<title>#NAME#</title>
+		<base href='#BASE#'/>
+		<script type='application/javascript' src='gl-matrix.js'></script>
+		<script type='application/javascript' src='mgrl.js'></script>
+		<script type='application/javascript' src='rpc.js'></script>
+		<script type='application/javascript' src='builders.js'></script>
+		<script type='application/javascript' src='webgame.js?#QUERY#'></script>
+		#SOURCE#
+		<link rel='stylesheet' href='webgame.css'/>
+	</head>
+	<body class='disconnected'>
+		<form>
+			<div id='title'>
+				<h1 id='game_title'></h1>
+				<p id='titleselection'>
+					<select id='title_games'></select>
+					<button type='button' onclick="_title_join()">Join</button>
+					<button type='button' onclick="_title_view()">Watch</button>
+				</p>
+				<p>
+					<button type='button' onclick="_title_new()">Create new game</button>
+					Name:
+					<input type='text' id='title_game_name'/>
+				</p>
+			</div>
+			<div id='notitle' class='hidden'>
+				<div id='content'><canvas id='canvas' width='1200' height='600'></canvas></div>
+				<div id='footer'>
+					<span id='state'></span>
+					<button id='leave' type='button' onclick='_leave()'>Leave game</button>
+				</div>
+			</div>
+		</form>
+	</body>
+</html>
