@@ -16,20 +16,16 @@ body.disconnected {
 }
 
 #state {
-	float: right;
 }
 
 #content {
 	width: 100%;
 	text-align: center;
+	margin-bottom: 10em;
 }
 
 #connections {
 	clear: both;
-}
-
-.player {
-	color: blue;
 }
 
 #footer {
@@ -38,10 +34,6 @@ body.disconnected {
 	width: 95%;
 	left: 2.5%;
 	text-align: center;
-}
-
-#content {
-	margin-bottom: 10em;
 }
 
 #canvas {
@@ -59,4 +51,18 @@ body.disconnected {
 
 #leave {
 	float: right;
+}
+
+#name {
+	float: left;
+}
+
+#players {
+	position: fixed;
+	bottom: 2em;
+	width: 95%;
+}
+
+#players span {
+	margin: 0px 2em;
 }

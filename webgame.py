@@ -200,8 +200,8 @@ timeouts = []
 # Programs to run without a game context.
 queue = []
 
-# All connections (both viewers and players).
-connections = set()
+# All connections (both viewers and players); keys are names.
+connections = {}
 
 # String to paste into javascript for loading asserts.
 loader_js = None
@@ -233,8 +233,11 @@ class Instance:
 			name = '%s (%d)' % (n, i)
 			i += 1
 		instances[name] = self
-		self.game.add_player = lambda: self.add_player()
-		self.game.remove_player = lambda p: self.remove_player(p)
+		self.game.broadcast = server.broadcast[name]
+		if not hasattr(self.game, 'add_player'):
+			self.game.add_player = lambda: self.add_player()
+		if not hasattr(self.game, 'remove_player'):
+			self.game.remove_player = lambda p: self.remove_player(p)
 		# Generators which are waiting to be called, stored as (generator, arg) tuples.
 		self.queue = []
 		# Allowed commands at this time.  Keys are command names, values are tuples of
@@ -245,6 +248,7 @@ class Instance:
 		self.game.public = Shared_Object(['public'], None, name)
 		self.game.public._live()
 		self.game.public.name = name
+		self.game.public.players = []
 		# Set up players.
 		if cls is not Title:
 			if not hasattr(self.game, 'min_players'):
@@ -263,6 +267,9 @@ class Instance:
 		log("started new instance '%s'" % name)
 
 	def close(self):
+		if self.game.public.name not in instances:
+			# Already closed.
+			return
 		log("stopped instance '%s'" % self.game.public.name)
 		del instances[self.game.public.name]
 		self.game.public._die()
@@ -276,13 +283,14 @@ class Instance:
 			try:
 				#log('sending %s' % repr(arg))
 				cmd = f.send(arg)
-			except StopIteration:
+			except StopIteration as e:
+				self.game.broadcast.win(e.value)
 				#log('done')
 				self.close()
 				for c in connections:
-					if c.instance != self:
+					if connections[c].instance != self:
 						continue
-					leave({'connection': c})
+					leave({'connection': connections[c]})
 				return
 		else:
 			cmd = f(arg)
@@ -324,8 +332,9 @@ class Instance:
 		p.private._live()
 		#log('appending %s' % p)
 		self.game.players.append(p)
+		self.game.public.players.append({})
 		return len(self.game.players) - 1
-	
+
 	def remove_player(self, p):
 		assert len(self.game.players) > self.game.min_players
 		assert p < len(self.game.players)
@@ -335,6 +344,7 @@ class Instance:
 			self.game.players[p].connection.socket.end_game.event()
 			self.game.players[p].connection = None
 		self.game.players[p].private._die()
+		self.game.public.players.pop(p)
 		self.game.players.pop(p)
 
 	# Call a function or generator, with arguments.
@@ -349,22 +359,33 @@ class Instance:
 class Connection:
 	def __init__(self, socket):
 		self._socket = socket
-		connections.add(self)
+		if 'name' in socket.data['query']:
+			name = socket.data['query']['name'][0]
+		else:
+			name = 'anonymous'
+		self.name = name
+		i = 0
+		while self.name in connections:
+			self.name = '%s %d' % (name, i)
+			i += 1
+		connections[self.name] = self
 		self._socket.closed = self._closed
 		self.instance = title_game
 		self._socket._groups.add(title_game.game.public.name)
 		self.num = None
 		# Inform about state.
+		self._socket.name.event(self.name)
 		broadcast_shared(self, ['public'], self.instance.game.public)
 		broadcast_shared(self, ['private'], None, title_game.game.public.name)
 	def _closed(self):
 		if self.num is not None:
 			self.instance.game.players[self.num].connection = None
+			self.instance.game.public.players[self.num]['name'] = None
 			if __main__.autokill and all(p.connection is None for p in self.instance.game.players):
 				# Last player left; destroy game.
 				self.instance.close()
 			self.num = None
-		connections.remove(self)
+		del connections[self.name]
 	def __getattr__(self, attr):
 		'''Allow usage of registered commands.'''
 		if attr.startswith('_'):
@@ -487,6 +508,7 @@ class Title:
 				connection._socket._groups.remove(self.public.name)
 				connection._socket._groups.add(cmd['args'][0])
 				broadcast_shared(connection, ['public'], connection.instance.game.public)
+				connection.instance.game.public.players[connection.num]['name'] = connection.name
 				broadcast_shared(connection, ['private'], connection.instance.game.players[connection.num].private)
 			elif command == 'return':
 				if len(cmd['args']) < 2 or cmd['args'][1] >= len(instance.game.players) or instance.game.players[cmd['args'][1]].connection is not None:
@@ -498,6 +520,7 @@ class Title:
 				connection._socket._groups.remove(self.public.name)
 				connection._socket._groups.add(cmd['args'][0])
 				broadcast_shared(connection, ['public'], connection.instance.game.public)
+				connection.instance.game.public.players[connection.num]['name'] = connection.name
 				broadcast_shared(connection, ['private'], connection.instance.game.players[connection.num].private)
 			elif command == 'view':
 				connection.instance = instance
@@ -516,7 +539,7 @@ def leave(args):
 	if connection.num is not None:
 		connection.instance.game.players[connection.num].connection = None
 		if __main__.autokill and all(p.connection is None for p in connection.instance.game.players):
-			# Last player left; destroy game.
+			# Last player left; destroy game if it was still running.
 			connection.instance.close()
 	connection._socket._groups.remove(connection.instance.game.public.name)
 	connection.instance = title_game
@@ -562,7 +585,7 @@ def Game(cmd = {}, title = Title):
 		cmds[c] = (cmd[c], None)
 	# Start up websockets server.
 	if not fhs.initialized:
-		fhs.init(__main__.name.lower(), {}, game = True)
+		fhs.init({}, packagename = __main__.name.lower(), game = True)
 	config = fhs.module_get_config('webgame')
 	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = fhs.read_data('html', opened = False, multiple = True, dir = True))
 	server.page = page

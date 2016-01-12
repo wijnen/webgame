@@ -4,6 +4,9 @@ var server;
 var my_id, my_num = null;
 var _audio, audio;
 var _3d = #3D#;
+var _ending = false;
+var my_name = null;
+var _players = [], _playerdiv;
 
 AddEvent('load', function () {
 	_titlescreen = document.getElementById('title');
@@ -11,14 +14,15 @@ AddEvent('load', function () {
 	_title_title = document.getElementById('game_title');
 	_title_selection = document.getElementById('titleselection');
 	title_select = document.getElementById('title_games');
+	_playerdiv = document.getElementById('players');
 	Public = { state: '', name: '' };
-	Private = null;
+	Private = { state: '' };
 	var root = '#PREFIX#';
 	if (_3d) {
 		please.gl.set_context('canvas');
 	}
 	else {
-		please.dom.set_frame('content');
+		please.dom.set_context('canvas');
 	}
 	please.set_search_path('img', root + 'assets/img');
 	please.set_search_path('jta', root + 'assets/jta');
@@ -63,7 +67,7 @@ AddEvent('mgrl_media_ready', please.once(function () {
 	_audio = {};
 	audio = {};
 	var make_play = function(target) {
-		name = '';
+		var name = '';
 		obj = audio;
 		for (var i = 0; i < target[0].length; ++i) {
 			name += target[0][i] + '/';
@@ -89,7 +93,13 @@ AddEvent('mgrl_media_ready', please.once(function () {
 	var messages = {
 		public_update: _public_update,
 		private_update: _private_update,
-		'': function () {
+		win: _win,
+		name: function(n) {
+			my_name = n;
+			document.getElementById('title_game_name').value = my_name;
+			_makestate();
+		},
+		'': function() {
 			var name = arguments[0];
 			var args = [];
 			for (var a = 1; a < arguments.length; ++a)
@@ -111,19 +121,23 @@ function playercolor(num) {
 }
 
 function _public_update(path, value) {
-	if (path.length == 0) {
-		Public = value;
+	if (path !== undefined) {
+		if (path.length == 0) {
+			Public = value;
+		}
+		else {
+			var target = Public;
+			for (var i = 0; i < path.length - 1; ++i)
+				target = target[path[i]];
+			if (value === undefined)
+				delete target[path[path.length - 1]];
+			else
+				target[path[path.length - 1]] = value;
+		}
 	}
-	else {
-		var target = Public;
-		for (var i = 0; i < path.length - 1; ++i)
-			target = target[path[i]];
-		if (value === undefined)
-			delete target[path[path.length - 1]];
-		else
-			target[path[path.length - 1]] = value;
-	}
-	_state.ClearAll().AddText((Public.state || '') + ((Private && Private.state) || ''));
+	if (_ending)
+		return;
+	_makestate();
 	if (Public.name == '') {
 		// Show title screen.
 		_title_title.ClearAll().AddText(Public.title);
@@ -159,6 +173,7 @@ function _public_update(path, value) {
 		// Show the titlescreen.
 		_titlescreen.RemoveClass('hidden');
 		_mainscreen.AddClass('hidden');
+		please.renderer.overlay.AddClass('hidden');
 		if (window.title_public_update !== undefined)
 			window.title_public_update();
 		if (window.title_update !== undefined)
@@ -168,6 +183,8 @@ function _public_update(path, value) {
 	// Hide the titlescreen.
 	_titlescreen.AddClass('hidden');
 	_mainscreen.RemoveClass('hidden');
+	please.renderer.overlay.RemoveClass('hidden');
+	please.__align_canvas_overlay();
 	if (window.public_update !== undefined)
 		window.public_update();
 	if (window.update !== undefined)
@@ -201,19 +218,23 @@ function _title_new() {
 }
 
 function _private_update(path, value) {
-	if (path.length == 0) {
-		Private = value;
+	if (path !== undefined) {
+		if (path.length == 0) {
+			Private = value;
+		}
+		else {
+			var target = Private;
+			for (var i = 0; i < path.length - 1; ++i)
+				target = target[path[i]];
+			if (value === undefined)
+				delete target[path[path.length - 1]];
+			else
+				target[path[path.length - 1]] = value;
+		}
 	}
-	else {
-		var target = Private;
-		for (var i = 0; i < path.length; ++i)
-			target = target[path[i]];
-		if (value === undefined)
-			delete target[path[path.length - 1]];
-		else
-			target[path[path.length - 1]] = value;
-	}
-	_state.ClearAll().AddText((Public.state || '') + ((Private && Private.state) || ''));
+	if (_ending)
+		return;
+	_makestate();
 	if (Public.name == '') {
 		if (window.title_private_update !== undefined)
 			window.title_private_update();
@@ -229,4 +250,53 @@ function _private_update(path, value) {
 
 function _leave() {
 	server.call('leave');
+}
+
+function _win(who) {
+	if (window.win !== undefined)
+		return window.win();
+	_ending = true;
+	if (who === null)
+		alert('Game ended.');
+	else if (Public.players[who].name == my_name)
+		alert('Game ended; you won!');
+	else
+		alert('Game ended; winner: ' + Public.players[who].name);
+	_ending = false;
+	_public_update();
+	_private_update();
+}
+
+function _makestate() {
+	_state.ClearAll().AddText((Public.state || '') + ((Private && Private.state) || ''));
+	while (Public.players.length < _players.length)
+		_playerdiv.removeChild(_players.pop()[0]);
+	while (_players.length < Public.players.length)
+		_players.push([_playerdiv.AddElement('span', 'player'), null]);
+	for (var p = 0; p < _players.length; ++p) {
+		if (_players[p][1] != Public.players[p].name) {
+			_players[p][1] = Public.players[p].name;
+			_players[p][0].ClearAll().AddText(_players[p][1]);
+			_players[p][0].style.color = playercolor(p);
+			if (my_name == _players[p][1])
+				_players[p][0].AddClass('self');
+			else
+				_players[p][0].RemoveClass('self');
+		}
+	}
+}
+
+function new_canvas(w, h, name) {
+	var div = please.overlay.new_element(name);
+	var node = new please.GraphNode();
+	node.div = div;
+	graph.add(node);
+	div.bind_to_node(node);
+	node.canvas = div.AddElement('canvas');
+	node.canvas.width = w * window.camera.orthographic_grid;
+	node.canvas.height = h * window.camera.orthographic_grid;
+	node.context = node.canvas.getContext('2d');
+	node.context.scale(1 / window.camera.orthographic_grid, -1 / window.camera.orthographic_grid);
+	node.context.translate(w / 2, h / -2);
+	return node;
 }
