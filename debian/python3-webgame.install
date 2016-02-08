@@ -1,6 +1,4 @@
-html/admin.css /usr/share/python3-webgame/html
-html/admin.html /usr/share/python3-webgame/html
-html/admin.js /usr/share/python3-webgame/html
 html/webgame.css /usr/share/python3-webgame/html
 html/webgame.html /usr/share/python3-webgame/html
 html/webgame.js /usr/share/python3-webgame/html
+usr/lib/python3/*-packages/*

@@ -7,7 +7,7 @@ Standards-Version: 3.9.6
 
 Package: python3-webgame
 Architecture: all
-Depends: ${misc:Depends}, ${python3:Depends}, python3-websockets
+Depends: ${misc:Depends}, ${python3:Depends}, python3-websocketd
 Description: python3 module for creating a web based game
  This module does most of the work of building a multi-player web based game.
  Only the game rules need to be written in a Python program, the interface

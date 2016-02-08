@@ -1,9 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 
 import distutils.core
+
 distutils.core.setup (
 		name = 'webgame',
-		packages = ['webgame', 'webgame.client', 'webgame.server'],
+		py_modules = ['webgame'],
 		version = '0.1',
 		description = 'web based game creator',
 		author = 'Bas Wijnen',

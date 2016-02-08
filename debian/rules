@@ -1,14 +1,19 @@
 #!/usr/bin/make -f
 
 %:
-	dh $@ --with python3 --buildsystem=pybuild
+	dh $@ --with python3
 
 override_dh_auto_clean:
 	dh_auto_clean
-	rm -rf *.pyc *.pyo build
+	rm -rf build
 
-override_dh_install:
-	dh_auto_install
+override_dh_auto_build:
+	python3 setup.py build
+
+override_dh_auto_install:
+	python3 setup.py install --root=$(CURDIR)/debian/tmp --install-layout=deb
 	dh_install
+	# Copy external sources into the package.
+	# They should really be packaged separately.
 	mkdir -p debian/python3-webgame/usr/share/python3-webgame/html/
-	cp -L html/mgrl.js html/diffuse.frag html/simple.vert html/gl-matrix.js debian/python3-webgame/usr/share/python3-webgame/html/
+	cp -L html/mgrl.js html/gl-matrix.js debian/python3-webgame/usr/share/python3-webgame/html/
