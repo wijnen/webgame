@@ -13,28 +13,26 @@
 		<link rel='stylesheet' href='webgame.css'/>
 	</head>
 	<body class='disconnected'>
-		<form>
-			<div id='title'>
-				<h1 id='game_title'></h1>
-				<p id='titleselection'>
-					<select id='title_games'></select>
-					<button type='button' onclick="_title_join()">Join</button>
-					<button type='button' onclick="_title_view()">Watch</button>
-				</p>
-				<p>
-					<button type='button' onclick="_title_new()">Create new game</button>
-					Name:
-					<input type='text' id='title_game_name'/>
-				</p>
-			</div>
-			<div id='notitle' class='hidden'>
-				<canvas id='canvas' width='1200' height='600'></canvas>
-				<div id='players'></div>
-				<div id='footer'>
-					<span id='state'></span>
-					<button id='leave' type='button' onclick='_leave()'>Leave game</button>
-				</div>
-			</div>
-		</form>
+		<div id='title'>
+			<h1 id='game_title'></h1>
+			<p id='titleselection'>
+				<select id='title_games'></select>
+				<button type='button' onclick="_title_join()">Join</button>
+				<button type='button' onclick="_title_view()">Watch</button>
+			</p>
+			<p>
+				<button type='button' onclick="_title_new()">Create new game</button>
+				Name:
+				<input type='text' id='title_game_name'/>
+			</p>
+		</div>
+		<div id='notitle' class='hidden'>
+			<canvas id='canvas' width='1200' height='600'></canvas>
+			<div id='players'></div>
+		</div>
+		<div id='footer'>
+			<span id='state'></span>
+			<button id='leave' type='button' onclick='_leave()'>Leave game</button>
+		</div>
 	</body>
 </html>

@@ -356,6 +356,19 @@ class Instance:
 		if type(fn) == generator_type:
 			self.queue.append((fn, None))
 
+class Args(dict):
+	def __init__(self, a, ka):
+		for k in ka:
+			self[k] = ka[k]
+		for i, v in enumerate(a):
+			self[i] = v
+		self.length = len(a)
+	def __len__(self):
+		return self.length
+	def __iter__(self):
+		for i in range(self.length):
+			yield self[i]
+
 class Connection:
 	def __init__(self, socket):
 		self._socket = socket
@@ -409,8 +422,7 @@ class Connection:
 			if instance is not None:
 				instance.cleanup(f)
 			websocketd.endloop()
-			args = {'args': ka, 'connection': self, 'player': self.num, 'command': attr, 'nargs': len(a)}
-			args['args'].update({i: x for i, x in enumerate(a)})
+			args = {'args': Args(a, ka), 'connection': self, 'player': self.num, 'command': attr}
 			if func is not None:
 				ret = func(args)
 			else:
@@ -426,7 +438,7 @@ class Connection:
 def page(connection): # {{{
 	if any(connection.address.path == '/' + x for x in ('rpc.js', 'builders.js')):
 		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-websocketd').read())
-	elif any(connection.address.path == '/' + x for x in ('admin.js', 'webgame.js', 'gl-matrix.js', 'mgrl.js')):
+	elif any(connection.address.path == '/' + x for x in ('webgame.js', 'gl-matrix.js', 'mgrl.js')):
 		def makeaudio(dirobj, dir):
 			ret = []
 			for f in os.listdir(dir):
@@ -449,10 +461,8 @@ def page(connection): # {{{
 		else:
 			use_3d = True
 		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-webgame').read().replace(b'#3D#', b'true' if use_3d else b'false').replace(b'#LOAD#', loader_js).replace(b'#PREFIX#', (connection.prefix + '/').encode('utf-8')).replace(b'#AUDIO#', audio))
-	elif any(connection.address.path == '/' + x for x in ('admin.css', 'webgame.css')):
+	elif connection.address.path == '/webgame.css':
 		server.reply_css(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-webgame').read())
-	elif connection.address.path == '/admin':
-		server.reply_html(connection, fhs.read_data('admin.html', text = False, packagename = 'python-webgame').read().replace(b'#NAME#', __main__.name.encode('utf-8')).replace(b'#BASE#', (connection.prefix + '/').encode('utf-8')))
 	elif connection.address.path == '/':
 		files = []
 		for d in connection.server.httpdirs:
@@ -572,7 +582,7 @@ def Game(cmd = {}, title = Title):
 	# Build asset string for inserting in js.
 	targets = []
 	for d in ('img', 'jta', 'gani', 'audio', 'text'):
-		p = os.path.join ('html', 'assets', d)
+		p = os.path.join('html', 'assets', d)
 		if os.path.exists(p):
 			targets.extend(f.encode('utf-8') for f in os.listdir(p) if not f.startswith('.') and not os.path.isdir(os.path.join(p, f)))
 	if len(targets) > 0:

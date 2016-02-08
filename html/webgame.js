@@ -1,4 +1,5 @@
-var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _mainscreen, _title_selection;
+var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _mainscreen, _footer, _title_selection;
+var _gametitle;
 var title_gamelist = [];
 var server;
 var my_id, my_num = null;
@@ -7,10 +8,13 @@ var _3d = #3D#;
 var _ending = false;
 var my_name = null;
 var _players = [], _playerdiv;
+var viewport = [-20, -15, 20, 15];
 
 AddEvent('load', function () {
+	_gametitle = document.title;
 	_titlescreen = document.getElementById('title');
 	_mainscreen = document.getElementById('notitle');
+	_footer = document.getElementById('footer');
 	_title_title = document.getElementById('game_title');
 	_title_selection = document.getElementById('titleselection');
 	title_select = document.getElementById('title_games');
@@ -57,8 +61,8 @@ AddEvent('mgrl_media_ready', please.once(function () {
 		camera.location = [-3, -8, 5];
 	}
 	else {
-		please.pipeline.add(1, 'main/draw', function () {
-			graph.sync();
+		please.pipeline.add(1, 'main/draw', function() {
+			graph.draw();
 		});
 	}
 	graph.add(camera);
@@ -111,11 +115,17 @@ AddEvent('mgrl_media_ready', please.once(function () {
 		function() { _body.RemoveClass('disconnected'); },
 		function() { _body.AddClass('disconnected'); });
 	please.pipeline.start();
+	window.AddEvent('resize', _resize_window);
 	if (window.init !== undefined) window.init();
 }));
 
+AddEvent('mgrl_dom_context_changed', function () {
+	if (window.update_canvas)
+		window.update_canvas(please.dom.context);
+});
+
 function playercolor(num) {
-	var colors = ['#f00', '#0f0', '#00f', '#ff0', '#f0f', '#0ff', '#fff', '#000'];
+	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
 	num %= colors.length;
 	return colors[num];
 }
@@ -139,6 +149,7 @@ function _public_update(path, value) {
 		return;
 	_makestate();
 	if (Public.name == '') {
+		document.title = _gametitle;
 		// Show title screen.
 		_title_title.ClearAll().AddText(Public.title);
 		var games = Public.games || [];
@@ -173,6 +184,7 @@ function _public_update(path, value) {
 		// Show the titlescreen.
 		_titlescreen.RemoveClass('hidden');
 		_mainscreen.AddClass('hidden');
+		_footer.AddClass('hidden');
 		please.renderer.overlay.AddClass('hidden');
 		if (window.title_public_update !== undefined)
 			window.title_public_update();
@@ -180,11 +192,15 @@ function _public_update(path, value) {
 			window.title_update();
 		return;
 	}
-	// Hide the titlescreen.
-	_titlescreen.AddClass('hidden');
-	_mainscreen.RemoveClass('hidden');
-	please.renderer.overlay.RemoveClass('hidden');
-	please.__align_canvas_overlay();
+	if (_mainscreen.clientHeight == 0) {
+		// Hide the titlescreen.
+		_titlescreen.AddClass('hidden');
+		_mainscreen.RemoveClass('hidden');
+		_footer.RemoveClass('hidden');
+		please.renderer.overlay.RemoveClass('hidden');
+		_resize_window();
+		document.title = _gametitle + ' - ' + Public.name;
+	}
 	if (window.public_update !== undefined)
 		window.public_update();
 	if (window.update !== undefined)
@@ -256,15 +272,18 @@ function _win(who) {
 	if (window.win !== undefined)
 		return window.win();
 	_ending = true;
-	if (who === null)
-		alert('Game ended.');
-	else if (Public.players[who].name == my_name)
-		alert('Game ended; you won!');
-	else
-		alert('Game ended; winner: ' + Public.players[who].name);
-	_ending = false;
-	_public_update();
-	_private_update();
+	var name = Public.players[who].name;
+	requestAnimationFrame(function() {
+		if (who === null)
+			alert('Game ended.');
+		else if (name == my_name)
+			alert('Game ended; you won!');
+		else
+			alert('Game ended; winner: ' + name);
+		_ending = false;
+		_public_update();
+		_private_update();
+	});
 }
 
 function _makestate() {
@@ -286,17 +305,69 @@ function _makestate() {
 	}
 }
 
-function new_canvas(w, h, name) {
+var _canvas_list = [];
+var _div_list = [];
+
+function new_canvas(w, h, name, redraw) {
 	var div = please.overlay.new_element(name);
 	var node = new please.GraphNode();
 	node.div = div;
 	graph.add(node);
 	div.bind_to_node(node);
 	node.canvas = div.AddElement('canvas');
-	node.canvas.width = w * window.camera.orthographic_grid;
-	node.canvas.height = h * window.camera.orthographic_grid;
-	node.context = node.canvas.getContext('2d');
-	node.context.scale(1 / window.camera.orthographic_grid, -1 / window.camera.orthographic_grid);
-	node.context.translate(w / 2, h / -2);
+	node.canvas.redraw_func = function() {
+		node.canvas.width = w * window.camera.orthographic_grid;
+		node.canvas.height = h * window.camera.orthographic_grid;
+		div.style.width = node.canvas.width + 'px';
+		div.style.height = node.canvas.height + 'px';
+		node.context = node.canvas.getContext('2d');
+		node.context.scale(window.camera.orthographic_grid, -window.camera.orthographic_grid);
+		node.context.translate(w / 2, h / -2);
+		if (redraw)
+			redraw(node.context);
+	};
+	_canvas_list.push(node.canvas);
+	node.canvas.redraw_func();
 	return node;
+}
+
+function new_div(w, h, pw, ph, name, redraw) {
+	var div = please.overlay.new_element(name);
+	var node = new please.GraphNode();
+	node.div = div;
+	graph.add(node);
+	div.bind_to_node(node);
+	div.style.width = pw + 'px';
+	div.style.height = ph + 'px';
+	div.redraw_func = function() {
+		div.style.transformOrigin = 'top left';
+		div.style.transform = 'scale(' + w * window.camera.orthographic_grid / pw + ',' + h * window.camera.orthographic_grid / ph + ')';
+		if (redraw)
+			redraw(div);
+	};
+	_div_list.push(div);
+	div.redraw_func();
+	return node;
+}
+
+function _resize_window() {
+	var size = _mainscreen.getBoundingClientRect();
+	if (size.width == 0 || size.height == 0)
+		return;
+	var vw = viewport[2] - viewport[0];
+	var vh = viewport[3] - viewport[1];
+	var other_w = size.height * vw / vh;
+	if (size.width > other_w)
+		please.dom.orthographic_grid = size.height / vh;
+	else
+		please.dom.orthographic_grid = size.width / vw;
+	window.camera.orthographic_grid = please.dom.orthographic_grid;
+	please.dom.canvas.width = size.width;
+	please.dom.canvas.height = size.height;
+	please.dom.canvas_changed();
+	for (var c = 0; c < _canvas_list.length; ++c)
+		_canvas_list[c].redraw_func();
+	for (var d = 0; d < _div_list.length; ++d)
+		_div_list[d].redraw_func();
+	please.__align_canvas_overlay();
 }
