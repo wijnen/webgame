@@ -19,6 +19,7 @@ viewport = [-5, -3, 5, 3];
 // Global variables. {{{
 var pieces; // array of 16 overlay elements.
 var choice; // overlay element.
+var used; // for each piece, where it is placed, or null.
 // }}}
 
 // This function is called after all assets are loaded.  It should be used to
@@ -31,10 +32,12 @@ function init() { // {{{
 	// }}}
 	// Create pieces. {{{
 	pieces = [];
+	used = [];
 	for (var p = 0; p < 16; ++p) {
 		// Use a function so every piece has its own p variable.
 		var makepiece = function(p) {
-			var piece = new_canvas(1, 1, 'piece-' + p, function(c) {
+			var piece = new_canvas(1, 1, 'piece-' + p, function(node) {
+				var c = node.context;
 				c.beginPath();
 				c.lineWidth = .1;
 				var style = playercolor(p & 1 ? 2 : 3);
@@ -56,6 +59,7 @@ function init() { // {{{
 			return piece;
 		};
 		pieces.push(makepiece(p));
+		used.push(null);
 	}
 	// }}}
 	please.renderer.overlay.AddEvent('click', click);
@@ -123,19 +127,47 @@ function update_canvas(c) { // {{{
 // self.public and self.players[].private variables respectively.
 function update() { // {{{
 	// Ignore updates until everything is complete.
-	if (!Public.board || !Public.pieces)
+	if (!Public.board || !Public.pieces || !Public.bounce)
 		return;
 	// Place unused pieces on the left.
 	for (var p = 0; p < 16; ++p) {
 		if (Public.pieces[p] !== null) {
 			pieces[p].location = [Math.trunc(p & 3) - 4, Math.trunc(p / 4) - 1.5, 1];
+			used[p] = null;
 		}
+	}
+	// Driver for moving a piece into its position.
+	var start = performance.now();
+	var move_piece = function(p, x, y) {
+		var x1 = x + 1;
+		var y1 = y - 1.5;
+		var x0 = p === null ? x1 : Math.trunc(p & 3) - 4;
+		var y0 = p === null ? y1 : Math.trunc(p / 4) - 1.5;
+		return function() {
+			var stamp = performance.now();
+			if (stamp < start + 1000) {
+				// please.mix interpolates on a line, so change the line, not the path.
+				offset = Math.sin(Math.PI / 1000 * (stamp - start));
+				return please.mix([x0, y0 + offset, 2], [x1, y1 + offset, 1], (stamp - start) / 1000);
+			}
+			return please.mix([x1, y1, 1], [x1, y1 + .3, 1], Math.abs(Math.sin((stamp - start - 1000) * 2 * Math.PI / 1000)));
+		};
 	}
 	// Place used pieces on the board.
 	for (var y = 0; y < 4; ++y) {
 		for (var x = 0; x < 4; ++x) {
-			if (Public.board[y][x] !== null)
-				pieces[Public.board[y][x]].location = [x + 1, y - 1.5, 1];
+			var p = Public.board[y][x];
+			if (p !== null) {
+				if (Public.bounce[p]) {
+					if (used[p] === null)
+						pieces[p].location = move_piece(p, x, y);
+					else if (!used[p])
+						pieces[p].location = move_piece(null, x, y);
+				}
+				else
+					pieces[p].location = [x + 1, y - 1.5, 1];
+				used[p] = Public.bounce[p];
+			}
 		}
 	}
 	// Place choice under selected piece.
@@ -146,3 +178,18 @@ function update() { // {{{
 	else
 		choice.visible = false;
 } // }}}
+
+// This function is called when the game ends.  For this game, it passes the
+// player number of the winner.
+// After this function is called, no more commands are accepted by the server
+// (except "leave").
+function end(code) {
+	if (code === null)
+		alert('No winner.');
+	else {
+		if (Public.players[code].name == my_name)
+			alert('You won!');
+		else
+			alert('You lost!');
+	}
+}

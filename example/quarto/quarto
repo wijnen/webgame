@@ -33,6 +33,7 @@ class Game:
 		# current board, and the available pieces.
 		self.public.board = [[None] * 4 for y in range(4)]
 		self.public.pieces = list(range(16))
+		self.public.bounce = []
 		# The game ends in a tie if both players have had 8 turns.
 		for turn in range(8):
 			for p in range(2):
@@ -73,19 +74,35 @@ class Game:
 				self.players[p].private.place = False
 				# Update board.
 				self.public.pieces[piece] = None
+				self.public.bounce = [t == piece for t in range(16)]
 				self.public.board[y][x] = piece
 				# Check victory.
-				if self.victory():
+				pieces = self.victory()
+				if len(pieces) > 0:
+					v = [False for t in range(16)]
+					for x, y in pieces:
+						v[self.public.board[y][x]] = True
+					self.public.bounce = v
+					self.public.piece = None
 					return p
 	def victory(self):
 		'''Check if the game has been won.'''
+		ret = []
 		for h in range(4):
-			if self.check([(h, v) for v in range(4)]):
-				return True
+			pieces = [(h, v) for v in range(4)]
+			if self.check(pieces):
+				ret += pieces
 		for v in range(4):
-			if self.check([(h, v) for h in range(4)]):
-				return True
-		return self.check([(i, i) for i in range(4)]) or self.check([(i, 3 - i) for i in range(4)])
+			pieces = [(h, v) for h in range(4)]
+			if self.check(pieces):
+				ret += pieces
+		pieces = [(i, i) for i in range(4)]
+		if self.check(pieces):
+			ret += pieces
+		pieces = [(i, 3 - i) for i in range(4)]
+		if self.check(pieces):
+			ret += pieces
+		return ret
 	def check(self, positions):
 		'''Check if a certian set of positions is a winning line.'''
 		if any(self.public.board[y][x] is None for x, y in positions):

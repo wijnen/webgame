@@ -1,16 +1,16 @@
 var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _mainscreen, _footer, _title_selection;
 var _gametitle;
+var _title_screen;
 var title_gamelist = [];
 var server;
-var my_id, my_num = null;
 var _audio, audio;
 var _3d = #3D#;
-var _ending = false;
 var my_name = null;
 var _players = [], _playerdiv;
 var viewport = [-20, -15, 20, 15];
 
 AddEvent('load', function () {
+	_title_screen = true;
 	_gametitle = document.title;
 	_titlescreen = document.getElementById('title');
 	_mainscreen = document.getElementById('notitle');
@@ -95,9 +95,9 @@ AddEvent('mgrl_media_ready', please.once(function () {
 	_body = document.getElementsByTagName('body')[0];
 	_state = document.getElementById('state');
 	var messages = {
+		win: function(code) { if (window.win !== undefined) window.win(code); },
 		public_update: _public_update,
 		private_update: _private_update,
-		win: _win,
 		name: function(n) {
 			my_name = n;
 			document.getElementById('title_game_name').value = my_name;
@@ -145,10 +145,9 @@ function _public_update(path, value) {
 				target[path[path.length - 1]] = value;
 		}
 	}
-	if (_ending)
-		return;
 	_makestate();
 	if (Public.name == '') {
+		_title_screen = true;
 		document.title = _gametitle;
 		// Show title screen.
 		_title_title.ClearAll().AddText(Public.title);
@@ -192,14 +191,19 @@ function _public_update(path, value) {
 			window.title_update();
 		return;
 	}
-	if (_mainscreen.clientHeight == 0) {
+	if (_title_screen) {
 		// Hide the titlescreen.
+		_title_screen = false;
 		_titlescreen.AddClass('hidden');
 		_mainscreen.RemoveClass('hidden');
 		_footer.RemoveClass('hidden');
 		please.renderer.overlay.RemoveClass('hidden');
-		_resize_window();
 		document.title = _gametitle + ' - ' + Public.name;
+		_resize_window();
+		if (window.update_canvas)
+			window.update_canvas(please.dom.context);
+		if (window.new_game)
+			window.new_game();
 	}
 	if (window.public_update !== undefined)
 		window.public_update();
@@ -230,7 +234,7 @@ function _title_view() {
 }
 
 function _title_new() {
-	server.call('new', [document.getElementById('title_game_name').value]);
+	server.call('new', [document.getElementById('title_game_name').value, Number(document.getElementById('title_num_players').value)]);
 }
 
 function _private_update(path, value) {
@@ -248,8 +252,6 @@ function _private_update(path, value) {
 				target[path[path.length - 1]] = value;
 		}
 	}
-	if (_ending)
-		return;
 	_makestate();
 	if (Public.name == '') {
 		if (window.title_private_update !== undefined)
@@ -268,26 +270,10 @@ function _leave() {
 	server.call('leave');
 }
 
-function _win(who) {
-	if (window.win !== undefined)
-		return window.win();
-	_ending = true;
-	var name = Public.players[who].name;
-	requestAnimationFrame(function() {
-		if (who === null)
-			alert('Game ended.');
-		else if (name == my_name)
-			alert('Game ended; you won!');
-		else
-			alert('Game ended; winner: ' + name);
-		_ending = false;
-		_public_update();
-		_private_update();
-	});
-}
-
 function _makestate() {
 	_state.ClearAll().AddText((Public.state || '') + ((Private && Private.state) || ''));
+	if (!Public.players)
+		return;
 	while (Public.players.length < _players.length)
 		_playerdiv.removeChild(_players.pop()[0]);
 	while (_players.length < Public.players.length)
@@ -316,19 +302,30 @@ function new_canvas(w, h, name, redraw) {
 	div.bind_to_node(node);
 	node.canvas = div.AddElement('canvas');
 	node.canvas.redraw_func = function() {
-		node.canvas.width = w * window.camera.orthographic_grid;
-		node.canvas.height = h * window.camera.orthographic_grid;
-		div.style.width = node.canvas.width + 'px';
-		div.style.height = node.canvas.height + 'px';
+		node.canvas.width = w * 2 * window.camera.orthographic_grid;
+		node.canvas.height = h * 2 * window.camera.orthographic_grid;
+		div.style.width = node.canvas.style.width = node.canvas.width / 2 + 'px';
+		div.style.height = node.canvas.style.heigth = node.canvas.height / 2 + 'px';
 		node.context = node.canvas.getContext('2d');
-		node.context.scale(window.camera.orthographic_grid, -window.camera.orthographic_grid);
-		node.context.translate(w / 2, h / -2);
+		node.context.scale(window.camera.orthographic_grid * 2, -window.camera.orthographic_grid * 2);
+		node.context.translate(w / 2, -h / 2);
 		if (redraw)
-			redraw(node.context);
+			redraw(node);
 	};
 	_canvas_list.push(node.canvas);
+	node.canvas.AddEvent('click', function(event) {
+		if (!node.selectable)
+			return;
+		node.dispatch('click', event);
+	});
 	node.canvas.redraw_func();
 	return node;
+}
+
+function del_canvas(node) {
+	_canvas_list.splice(_canvas_list.indexOf(node.canvas), 1);
+	graph.remove(node);
+	please.overlay.remove_element(node.div);
 }
 
 function new_div(w, h, pw, ph, name, redraw) {
@@ -343,31 +340,52 @@ function new_div(w, h, pw, ph, name, redraw) {
 		div.style.transformOrigin = 'top left';
 		div.style.transform = 'scale(' + w * window.camera.orthographic_grid / pw + ',' + h * window.camera.orthographic_grid / ph + ')';
 		if (redraw)
-			redraw(div);
+			redraw(node);
 	};
 	_div_list.push(div);
+	div.AddEvent('click', function(event) {
+		if (!node.selectable)
+			return;
+		node.dispatch('click', event);
+	});
 	div.redraw_func();
 	return node;
 }
 
+function del_div(node) {
+	_div_list.splice(_div_list.indexOf(node.div), 1);
+	graph.remove(node);
+	please.overlay.remove_element(node.div);
+}
+
 function _resize_window() {
-	var size = _mainscreen.getBoundingClientRect();
-	if (size.width == 0 || size.height == 0)
+	var size = [_mainscreen.clientWidth, _mainscreen.clientHeight];
+	if (size[0] == 0 || size[1] == 0)
 		return;
 	var vw = viewport[2] - viewport[0];
 	var vh = viewport[3] - viewport[1];
-	var other_w = size.height * vw / vh;
-	if (size.width > other_w)
-		please.dom.orthographic_grid = size.height / vh;
+	var other_w = size[1] * vw / vh;
+	if (size[0] > other_w)
+		please.dom.orthographic_grid = size[1] / vh;
 	else
-		please.dom.orthographic_grid = size.width / vw;
+		please.dom.orthographic_grid = size[0] / vw;
 	window.camera.orthographic_grid = please.dom.orthographic_grid;
-	please.dom.canvas.width = size.width;
-	please.dom.canvas.height = size.height;
+	if (please.dom.canvas.width != size[0])
+		please.dom.canvas.width = size[0];
+	if (please.dom.canvas.height != size[1])
+		please.dom.canvas.height = size[1];
 	please.dom.canvas_changed();
+	please.__align_canvas_overlay();
+}
+
+window.AddEvent('mgrl_overlay_aligned', function () {
 	for (var c = 0; c < _canvas_list.length; ++c)
 		_canvas_list[c].redraw_func();
 	for (var d = 0; d < _div_list.length; ++d)
 		_div_list[d].redraw_func();
-	please.__align_canvas_overlay();
-}
+});
+
+window.AddEvent('mgrl_dom_context_changed', function() {
+	if (window.update_canvas)
+		window.update_canvas(please.dom.context);
+});

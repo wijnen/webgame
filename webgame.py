@@ -38,10 +38,12 @@ class Shared_Object(collections.MutableMapping):
 				assert self._path[0] == 'public'
 				server.broadcast[self._group].public_update(path)
 			elif self._path[0] == 'public':
-				assert self._group in self.target._socket._groups
-				self._target._socket.public_update.event(path)
+				assert self._group in self._target.connection._socket.groups
+				if self._target.connection:
+					self._target.connection._socket.public_update.event(path)
 			else:
-				self._target._socket.private_update.event(path)
+				if self._target.connection:
+					self._target.connection._socket.private_update.event(path)
 	def __getitem__(self, key):
 		return getattr(self, key)
 	def __setitem__(self, key, value):
@@ -102,10 +104,14 @@ class Shared_Array(collections.MutableSequence):
 				assert self.path[0] == 'public'
 				server.broadcast[self.group].public_update(path, len(self.data))
 			elif self.path[0] == 'public':
-				assert self.group in self.target._socket._groups
-				self.target._socket.public_update.event(path, len(self.data))
+				assert self.group in self.target.connection._socket.groups
+				if self.target.connection:
+					self.target.connection._socket.public_update.event(path, len(self.data))
 			else:
-				self.target._socket.private_update.event(path, len(self.data))
+				if self.target.connection:
+					self.target.connection._socket.private_update.event(path, len(self.data))
+	def __lt__(self, other):
+		return list(self) < list(other)
 	def __len__(self):
 		return len(self.data)
 	def insert(self, index, obj):
@@ -177,15 +183,15 @@ def broadcast_shared(target, path, value, group = None):
 		assert group is None or group is value.group
 		group = value.group
 		value = value._json()
-	assert group is not None
 	if target is None:
+		assert group is not None
 		assert path[0] == 'public'
 		# Send public update to everyone.
 		#log('broadcast %s %s' % (repr(path), repr(value)))
 		server.broadcast[group].public_update(path[1:], value)
 	else:
 		if path[0] == 'public':
-			assert group in target._socket._groups
+			assert group in target._socket.groups
 			#log('public %s %s' % (repr(path), repr(value)))
 			# Send public information to target.
 			target._socket.public_update.event(path[1:], value)
@@ -225,7 +231,7 @@ class Player:
 	pass
 
 class Instance:
-	def __init__(self, name, cls):
+	def __init__(self, cls, name, num_players = None):
 		self.game = cls()
 		n = name
 		i = 0
@@ -244,6 +250,7 @@ class Instance:
 		# (function to call or int or sequence of ints) and (generator to resume, or None).
 		# Ints are players that are allowed to use this command.
 		self.cmds = {}
+		self.ended = False
 		# Initialize public variables.
 		self.game.public = Shared_Object(['public'], None, name)
 		self.game.public._live()
@@ -255,7 +262,7 @@ class Instance:
 				self.game.min_players = __main__.min_players
 			if not hasattr(self.game, 'max_players'):
 				self.game.max_players = __main__.max_players
-			num_players = __main__.num_players or __main__.min_players
+			num_players = num_players or __main__.min_players
 			title_game.game.public.games.append(name)
 		else:
 			num_players = 0
@@ -272,10 +279,21 @@ class Instance:
 			return
 		log("stopped instance '%s'" % self.game.public.name)
 		del instances[self.game.public.name]
+		for c in connections:
+			if connections[c].instance != self:
+				continue
+			leave({'connection': connections[c]})
 		self.game.public._die()
 		for p in self.game.players:
 			p.private._die()
 		title_game.game.public.games.remove(self.game.public.name)
+
+	def end_game(self, code):
+		#log('done')
+		self.ended = True
+		self.game.broadcast.end(code)
+		if all(p.connection is None for p in self.game.players):
+			self.close()
 
 	def run(self, now, f, arg):
 		self.game.now = now
@@ -284,38 +302,34 @@ class Instance:
 				#log('sending %s' % repr(arg))
 				cmd = f.send(arg)
 			except StopIteration as e:
-				self.game.broadcast.win(e.value)
-				#log('done')
-				self.close()
-				for c in connections:
-					if connections[c].instance != self:
-						continue
-					leave({'connection': connections[c]})
+				self.end_game(e.value)
 				return
 		else:
 			cmd = f(arg)
 		#log('cmd = %s' % repr(cmd))
-		if cmd is not None:
-			# Convert cmd to dict if it isn't.
-			if isinstance(cmd, str):
-				cmd = {cmd: None}
-			elif isinstance(cmd, (tuple, list)):
-				def mkcmd(src):
-					for c in src:
-						if isinstance(c, str):
-							yield (c, None)
-						else:
-							yield (None, c)
-				cmd = {x: y for x, y in mkcmd(cmd)}
-			#log('new cmd: %s' % repr(cmd))
-			# Schedule new timeout.
-			if None in cmd:
-				timeouts.append((cmd.pop(None), (self, f)))
-				timeouts.sort()
-			# Add new commands.
-			for c in cmd:
-				assert c not in self.cmds
-				self.cmds[c] = (cmd[c], f)
+		if cmd is None:
+			self.end_game(None)
+			return
+		# Convert cmd to dict if it isn't.
+		if isinstance(cmd, str):
+			cmd = {cmd: None}
+		elif isinstance(cmd, (tuple, list)):
+			def mkcmd(src):
+				for c in src:
+					if isinstance(c, str):
+						yield (c, None)
+					else:
+						yield (None, c)
+			cmd = {x: y for x, y in mkcmd(cmd)}
+		#log('new cmd: %s' % repr(cmd))
+		# Schedule new timeout.
+		if None in cmd:
+			timeouts.append((cmd.pop(None), (self, f)))
+			timeouts.sort()
+		# Add new commands.
+		for c in cmd:
+			assert c not in self.cmds
+			self.cmds[c] = (cmd[c], f)
 
 	def cleanup(self, f):
 		for k in [x for x in self.cmds if self.cmds[x][1] is f]:
@@ -384,7 +398,7 @@ class Connection:
 		connections[self.name] = self
 		self._socket.closed = self._closed
 		self.instance = title_game
-		self._socket._groups.add(title_game.game.public.name)
+		self._socket.groups.add(title_game.game.public.name)
 		self.num = None
 		# Inform about state.
 		self._socket.name.event(self.name)
@@ -471,7 +485,15 @@ def page(connection): # {{{
 					continue
 				files.append(("<script type='application/javascript' src='%s'></script>" % f).encode('utf-8'))
 		files.sort()
-		server.reply_html(connection, fhs.read_data('webgame.html', text = False, packagename = 'python-webgame').read().replace(b'#NAME#', __main__.name.encode('utf-8')).replace(b'#BASE#', (connection.prefix + '/').encode('utf-8')).replace(b'#SOURCE#', b'\n\t\t'.join(files)).replace(b'#QUERY#', connection.address.query.encode('utf-8')))
+		if __main__.min_players == __main__.max_players:
+			range_str = "<input id='title_num_players' type='hidden' value='%d'/>" % __main__.min_players
+		else:
+			if __main__.max_players is None:
+				player_range = '%d or more' % __main__.min_players
+			else:
+				player_range = 'from %d to %d' % (__main__.min_players, __main__.max_players)
+			range_str = "Number of players: <input type='text' id='title_num_players'/> (%s)</span>" % player_range
+		server.reply_html(connection, fhs.read_data('webgame.html', text = False, packagename = 'python-webgame').read().replace(b'#NAME#', __main__.name.encode('utf-8')).replace(b'#BASE#', (connection.prefix + '/').encode('utf-8')).replace(b'#SOURCE#', b'\n\t\t'.join(files)).replace(b'#QUERY#', connection.address.query.encode('utf-8')).replace(b'#RANGE#', range_str.encode('utf-8')))
 	else:
 		if 'name' in connection.query:
 			connection.data['name'] = connection.query['name'][-1]
@@ -495,7 +517,7 @@ class Title:
 				log('no game name specified')
 				continue
 			if command == 'new':
-				i = Instance(cmd['args'][0], __main__.Game)
+				i = Instance(__main__.Game, *cmd['args'])
 				cmd['args'][0] = i.game.public.name
 				command = 'join'	# fall through.
 			if cmd['args'][0] not in instances:
@@ -515,8 +537,8 @@ class Title:
 						continue
 				connection.instance = instance
 				instance.game.players[connection.num].connection = connection
-				connection._socket._groups.remove(self.public.name)
-				connection._socket._groups.add(cmd['args'][0])
+				connection._socket.groups.remove(self.public.name)
+				connection._socket.groups.add(cmd['args'][0])
 				broadcast_shared(connection, ['public'], connection.instance.game.public)
 				connection.instance.game.public.players[connection.num]['name'] = connection.name
 				broadcast_shared(connection, ['private'], connection.instance.game.players[connection.num].private)
@@ -527,17 +549,17 @@ class Title:
 				connection.instance = instance
 				connection.num = cmd['args'][1]
 				instance.game.players[cmd['args'][1]].connection = connection
-				connection._socket._groups.remove(self.public.name)
-				connection._socket._groups.add(cmd['args'][0])
+				connection._socket.groups.remove(self.public.name)
+				connection._socket.groups.add(cmd['args'][0])
 				broadcast_shared(connection, ['public'], connection.instance.game.public)
 				connection.instance.game.public.players[connection.num]['name'] = connection.name
 				broadcast_shared(connection, ['private'], connection.instance.game.players[connection.num].private)
 			elif command == 'view':
 				connection.instance = instance
-				connection._socket._groups.remove(self.public.name)
-				connection._socket._groups.add(cmd['args'][0])
-				broadcast_shared(connection, ['public'], connection.instance.public)
-				broadcast_shared(connection, ['private'], None, connection.instance.game.name)
+				connection._socket.groups.remove(self.public.name)
+				connection._socket.groups.add(cmd['args'][0])
+				broadcast_shared(connection, ['public'], connection.instance.game.public)
+				broadcast_shared(connection, ['private'], None)
 			else:
 				log('impossible command')
 				continue
@@ -546,17 +568,20 @@ def leave(args):
 	connection = args['connection']
 	if connection.instance is title_game:
 		return
+	end = None
 	if connection.num is not None:
 		connection.instance.game.players[connection.num].connection = None
-		if __main__.autokill and all(p.connection is None for p in connection.instance.game.players):
+		if (__main__.autokill or connection.instance.ended) and all(p.connection is None for p in connection.instance.game.players):
 			# Last player left; destroy game if it was still running.
-			connection.instance.close()
-	connection._socket._groups.remove(connection.instance.game.public.name)
+			end = connection.instance
+	connection._socket.groups.remove(connection.instance.game.public.name)
 	connection.instance = title_game
-	connection._socket._groups.add(title_game.game.public.name)
+	connection._socket.groups.add(title_game.game.public.name)
 	connection.num = None
 	broadcast_shared(connection, ['public'], connection.instance.game.public)
 	broadcast_shared(connection, ['private'], None, title_game.game.public.name)
+	if end:
+		end.close()
 
 # Main function to start a game.  Pass commands that always work, if any.
 def Game(cmd = {}, title = Title):
@@ -609,7 +634,7 @@ def Game(cmd = {}, title = Title):
 	server.handle_ext('mp3', 'audio/mp3')
 	server.handle_ext('jta', 'application/octet-stream')
 	# Set up title page.
-	title_game = Instance('', title)
+	title_game = Instance(title, '')
 	log('Game "%s" started' % __main__.name)
 	# Main loop.
 	while running:

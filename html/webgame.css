@@ -45,7 +45,6 @@ body.disconnected {
 }
 
 #canvas {
-	background: #ffc;
 	position: fixed;
 	left: 0px;
 	right: 0px;
@@ -77,4 +76,8 @@ body.disconnected {
 
 #players span {
 	margin: 0px 2em;
+}
+
+#title_num_players {
+	width: 3em;
 }
