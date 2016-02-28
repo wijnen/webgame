@@ -84,7 +84,11 @@ class Game:
 						v[self.public.board[y][x]] = True
 					self.public.bounce = v
 					self.public.piece = None
+					self.players[p].private.state = 'You won!'
+					self.players[1 - p].private.state = 'You lost!'
 					return p
+		for p in range(2):
+			self.players[1].private.state = 'Game ended; no winner'
 	def victory(self):
 		'''Check if the game has been won.'''
 		ret = []

@@ -209,8 +209,12 @@ queue = []
 # All connections (both viewers and players); keys are names.
 connections = {}
 
-# String to paste into javascript for loading asserts.
-loader_js = None
+# String to paste into javascript for loading asserts; two versions: [2d, 3d].
+loader_js = [None, None]
+
+# Whether or not 2d and 3d versions are available.
+have_2d = None
+have_3d = None
 
 # Generator type, for checking if things are generators.
 generator_type = type((lambda: (yield))())
@@ -465,16 +469,16 @@ def page(connection): # {{{
 				else:
 					ret.append((dirobj, f, os.path.splitext(f)[0]))
 			return ret
-		audio = json.dumps(makeaudio([], fhs.read_data(os.path.join('html', 'assets', 'audio'), text = False, opened = False, dir = True))).encode('utf-8')
-		if not __main__.have_3d:
+		audio = json.dumps(makeaudio([], fhs.read_data(os.path.join('html', 'audio'), text = False, opened = False, dir = True))).encode('utf-8')
+		if not have_3d:
 			use_3d = False
-		elif not __main__.have_2d:
+		elif not have_2d:
 			use_3d = True
 		elif '2d' in connection.query:
 			use_3d = False
 		else:
 			use_3d = True
-		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-webgame').read().replace(b'#3D#', b'true' if use_3d else b'false').replace(b'#LOAD#', loader_js).replace(b'#PREFIX#', (connection.prefix + '/').encode('utf-8')).replace(b'#AUDIO#', audio))
+		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-webgame').read().replace(b'#3D#', b'true' if use_3d else b'false').replace(b'#LOAD#', loader_js[use_3d]).replace(b'#PREFIX#', (connection.prefix + '/').encode('utf-8')).replace(b'#AUDIO#', audio))
 	elif connection.address.path == '/webgame.css':
 		server.reply_css(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-webgame').read())
 	elif connection.address.path == '/':
@@ -497,7 +501,10 @@ def page(connection): # {{{
 	else:
 		if 'name' in connection.query:
 			connection.data['name'] = connection.query['name'][-1]
-		websocketd.RPChttpd.page(server, connection)
+		path = connection.address.path.split('/')
+		if path[-1].startswith('2d-') or path[-1].startswith('3d-'):
+			path = path[:-2] + [path[-1][:2], path[-2], path[-1][3:]]
+		websocketd.RPChttpd.page(server, connection, '/'.join(path))
 # }}}
 
 class Title:
@@ -585,16 +592,18 @@ def leave(args):
 
 # Main function to start a game.  Pass commands that always work, if any.
 def Game(cmd = {}, title = Title):
-	global server, loader_js, running, title_game, have_2d, have_3d
+	global server, running, title_game, have_2d, have_3d
 	# Set up the game name.
 	if not hasattr(__main__, 'name') or __main__.name is None:
 		__main__.name = os.path.basename(sys.argv[0]).capitalize()
+	# Initialize fhs module.
+	if not fhs.initialized:
+		fhs.init({}, packagename = __main__.name.lower(), game = True)
+	# Set up other constants.
 	if not hasattr(__main__, 'autokill'):
 		__main__.autokill = True
-	if not hasattr(__main__, 'have_3d'):
-		__main__.have_3d = False
-	if not hasattr(__main__, 'have_2d'):
-		__main__.have_2d = not __main__.have_3d
+	have_3d = fhs.read_data(os.path.join('html', '3d'), dir = True, opened = False) is not None
+	have_2d = fhs.read_data(os.path.join('html', '2d'), dir = True, opened = False) is not None or not have_3d
 	# Fill in min and max if not specified.
 	if hasattr(__main__, 'num_players'):
 		assert isinstance(__main__.num_players, int)
@@ -605,24 +614,25 @@ def Game(cmd = {}, title = Title):
 	assert hasattr(__main__, 'min_players') and isinstance(__main__.min_players, int)
 	assert hasattr(__main__, 'max_players') and __main__.max_players is None or (isinstance(__main__.max_players, int) and __main__.max_players >= __main__.min_players)
 	# Build asset string for inserting in js.
-	targets = []
-	for d in ('img', 'jta', 'gani', 'audio', 'text'):
-		p = os.path.join('html', 'assets', d)
-		if os.path.exists(p):
-			targets.extend(f.encode('utf-8') for f in os.listdir(p) if not f.startswith('.') and not os.path.isdir(os.path.join(p, f)))
-	if len(targets) > 0:
-		loader_js = b'\n'.join(b"\tplease.load('" + f + b"');" for f in targets)
-	else:
-		loader_js = b'\twindow.dispatchEvent(new CustomEvent("mgrl_media_ready"));'
+	for subdir, use_3d in (('2d', False), ('3d', True)):
+		targets = []
+		for base in ('img', 'jta', 'gani', 'audio', 'text'):
+			for d in (os.path.join('html', base), os.path.join('html', subdir, base)):
+				for p in fhs.read_data(d, dir = True, multiple = True, opened = False):
+					targets.extend(f.encode('utf-8') for f in os.listdir(p) if not f.startswith('.') and not os.path.isdir(os.path.join(p, f)))
+		if len(targets) > 0:
+			loader_js[use_3d] = b'\n'.join(b"\tplease.load('" + f + b"');" for f in targets)
+		else:
+			# Nothing to load, but force the "finished loading" event to fire anyway.
+			loader_js[use_3d] = b'\twindow.dispatchEvent(new CustomEvent("mgrl_media_ready"));'
 	# Set up commands.
 	cmds['leave'] = (leave, None)
 	for c in cmd:
 		cmds[c] = (cmd[c], None)
 	# Start up websockets server.
-	if not fhs.initialized:
-		fhs.init({}, packagename = __main__.name.lower(), game = True)
 	config = fhs.module_get_config('webgame')
-	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = fhs.read_data('html', opened = False, multiple = True, dir = True))
+	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html', os.path.join('html', '2d'), os.path.join('html', '3d'))]
+	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = httpdirs[0] + httpdirs[1] + httpdirs[2])
 	server.page = page
 	server.handle_ext('png', 'image/png')
 	server.handle_ext('jpg', 'image/jpeg')
@@ -633,6 +643,7 @@ def Game(cmd = {}, title = Title):
 	server.handle_ext('ogg', 'audio/ogg')
 	server.handle_ext('mp3', 'audio/mp3')
 	server.handle_ext('jta', 'application/octet-stream')
+	server.handle_ext('txt', 'text/plain')
 	# Set up title page.
 	title_game = Instance(title, '')
 	log('Game "%s" started' % __main__.name)

@@ -1,10 +1,11 @@
-var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _mainscreen, _footer, _title_selection;
+var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _mainscreen, _footer, _title_selection, _canvas;
 var _gametitle;
 var _title_screen;
 var title_gamelist = [];
 var server;
 var _audio, audio;
-var _3d = #3D#;
+var use_3d = #3D#;
+var mouse_navigation = true;
 var my_name = null;
 var _players = [], _playerdiv;
 var viewport = [-20, -15, 20, 15];
@@ -19,28 +20,29 @@ AddEvent('load', function () {
 	_title_selection = document.getElementById('titleselection');
 	title_select = document.getElementById('title_games');
 	_playerdiv = document.getElementById('players');
+	_canvas = document.getElementById('canvas');
 	Public = { state: '', name: '' };
 	Private = { state: '' };
 	var root = '#PREFIX#';
-	if (_3d) {
+	if (use_3d)
 		please.gl.set_context('canvas');
-	}
-	else {
+	else
 		please.dom.set_context('canvas');
-	}
-	please.set_search_path('img', root + 'assets/img');
-	please.set_search_path('jta', root + 'assets/jta');
-	please.set_search_path('gani', root + 'assets/gani');
-	please.set_search_path('audio', root + 'assets/audio');
-	please.set_search_path('glsl', root + 'assets/glsl');
-	please.set_search_path('text', root + 'assets/text');
+	please.set_search_path('img', root + 'img');
+	please.set_search_path('jta', root + 'jta');
+	please.set_search_path('gani', root + 'gani');
+	please.set_search_path('audio', root + 'audio');
+	please.set_search_path('glsl', root + 'glsl');
+	please.set_search_path('text', root + 'text');
 #LOAD#
 });
 
 AddEvent('mgrl_media_ready', please.once(function () {
 	window.graph = new please.SceneGraph();
 	window.camera = new please.CameraNode();
-	if (_3d) {
+	graph.add(camera);
+	graph.camera = camera;
+	if (use_3d) {
 		var prog = please.glsl('default', 'simple.vert', 'diffuse.frag');
 		prog.activate();
 		please.set_clear_color(0, 0, 0, 0);
@@ -53,19 +55,77 @@ AddEvent('mgrl_media_ready', please.once(function () {
 		vec3.normalize(light_direction, light_direction);
 		vec3.scale(light_direction, light_direction, -1);
 		prog.vars.light_direction = light_direction;
+		var renderer = new please.RenderNode('default');
+		renderer.graph = graph;
 		please.pipeline.add(1, 'main/draw', function () {
-			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-			graph.draw();
+			please.render(renderer);
 		});
-		camera.look_at = vec3.fromValues(0, 0, 1);
-		camera.location = [-3, -8, 5];
+		window.camera_base = new please.GraphNode();
+		graph.add(camera_base);
+		camera.look_at = camera_base;
+		camera.up_vector = [0, 0, 1];
+		camera_base.location = [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 0];
+		// Set initial distance to match requested viewport.
+		var rx = (viewport[2] - viewport[0]) / 2 / Math.tan(please.radians(camera.fov) / 2);
+		var ry = (viewport[3] - viewport[1]) / 2 / Math.tan(please.radians(camera.fov) / 2);
+		please.make_animatable(window, 'r', rx > ry ? rx : ry);
+		please.make_animatable(window, 'theta', -90);
+		please.make_animatable(window, 'phi', 30);
+		camera.location = function() { return [camera_base.location_x + r * Math.cos(please.radians(theta)) * Math.cos(please.radians(phi)), camera_base.location_y + r * Math.sin(please.radians(theta)) * Math.cos(please.radians(phi)), camera_base.location_z + r * Math.sin(please.radians(phi))]; };
+		if (mouse_navigation) {
+			window._move_event = [null, null];
+			window.AddEvent('mousedown', function(event) {
+				if (event.buttons != 4)
+					return;
+				_move_event = [event.clientX, event.clientY];
+			});
+			window.AddEvent('mousemove', function(event) {
+				if (event.buttons != 4)
+					return;
+				var diff = [event.clientX - _move_event[0], event.clientY - _move_event[1]];
+				_move_event = [event.clientX, event.clientY];
+				var clamp = function(min, val, max, wrap) {
+					if (val > max) {
+						if (wrap) {
+							while (val > max)
+								val -= (max - min);
+							return val;
+						}
+						return max;
+					}
+					if (val < min) {
+						if (wrap) {
+							while (val < min)
+								val += (max - min);
+							return val;
+						}
+						return min;
+					}
+					return val;
+				}
+				if (event.shiftKey) {
+					var dx = (diff[1] * Math.cos(please.radians(theta)) - diff[0] * Math.sin(please.radians(theta))) / -500 * r;
+					var dy = (diff[0] * Math.cos(please.radians(theta)) + diff[1] * Math.sin(please.radians(theta))) / -500 * r;
+					camera_base.location = [camera_base.location_x + dx, camera_base.location_y + dy, camera_base.location_z];
+				}
+				else {
+					theta = clamp(-180, theta - diff[0], 180, true);
+					phi = clamp(-89, phi + diff[1], 89, false);
+				}
+			});
+			window.AddEvent('mousewheel', function(event) {
+				r += event.detail;
+			});
+			window.AddEvent('DOMMouseScroll', function(event) {
+				r += event.detail;
+			});
+		}
 	}
 	else {
 		please.pipeline.add(1, 'main/draw', function() {
 			graph.draw();
 		});
 	}
-	graph.add(camera);
 	camera.activate();
 
 	_audio = {};
@@ -116,11 +176,13 @@ AddEvent('mgrl_media_ready', please.once(function () {
 		function() { _body.AddClass('disconnected'); });
 	please.pipeline.start();
 	window.AddEvent('resize', _resize_window);
+	if (!use_3d && window.init_2d !== undefined) window.init_2d();
+	if (use_3d && window.init_3d !== undefined) window.init_3d();
 	if (window.init !== undefined) window.init();
 }));
 
 AddEvent('mgrl_dom_context_changed', function () {
-	if (window.update_canvas)
+	if (window.update_canvas && !use_3d)
 		window.update_canvas(please.dom.context);
 });
 
@@ -200,7 +262,7 @@ function _public_update(path, value) {
 		please.renderer.overlay.RemoveClass('hidden');
 		document.title = _gametitle + ' - ' + Public.name;
 		_resize_window();
-		if (window.update_canvas)
+		if (window.update_canvas && !use_3d)
 			window.update_canvas(please.dom.context);
 		if (window.new_game)
 			window.new_game();
@@ -316,6 +378,9 @@ function new_canvas(w, h, name, redraw) {
 	node.canvas.AddEvent('click', function(event) {
 		if (!node.selectable)
 			return;
+		event.world_location = please.dom.pos_from_event(event.pageX, event.pageY, node.location_z);
+		// FIXME: this should take rotation and scale into account.
+		event.local_location = [event.world_location[0] - node.location_x, event.world_location[1] - node.location_y, 0];
 		node.dispatch('click', event);
 	});
 	node.canvas.redraw_func();
@@ -362,19 +427,24 @@ function _resize_window() {
 	var size = [_mainscreen.clientWidth, _mainscreen.clientHeight];
 	if (size[0] == 0 || size[1] == 0)
 		return;
-	var vw = viewport[2] - viewport[0];
-	var vh = viewport[3] - viewport[1];
-	var other_w = size[1] * vw / vh;
-	if (size[0] > other_w)
-		please.dom.orthographic_grid = size[1] / vh;
-	else
-		please.dom.orthographic_grid = size[0] / vw;
-	window.camera.orthographic_grid = please.dom.orthographic_grid;
-	if (please.dom.canvas.width != size[0])
-		please.dom.canvas.width = size[0];
-	if (please.dom.canvas.height != size[1])
-		please.dom.canvas.height = size[1];
-	please.dom.canvas_changed();
+	if (_canvas.width != size[0] || _canvas.height != size[1]) {
+		_canvas.width = size[0];
+		_canvas.height = size[1];
+		if (use_3d) {
+			gl.viewport(0, 0, size[0], size[1]);
+		}
+		else {
+			var vw = viewport[2] - viewport[0];
+			var vh = viewport[3] - viewport[1];
+			var other_w = size[1] * vw / vh;
+			if (size[0] > other_w)
+				please.dom.orthographic_grid = size[1] / vh;
+			else
+				please.dom.orthographic_grid = size[0] / vw;
+			window.camera.orthographic_grid = please.dom.orthographic_grid;
+			please.dom.canvas_changed();
+		}
+	}
 	please.__align_canvas_overlay();
 }
 
@@ -386,6 +456,6 @@ window.AddEvent('mgrl_overlay_aligned', function () {
 });
 
 window.AddEvent('mgrl_dom_context_changed', function() {
-	if (window.update_canvas)
+	if (window.update_canvas && !use_3d)
 		window.update_canvas(please.dom.context);
 });
