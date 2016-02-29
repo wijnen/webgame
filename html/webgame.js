@@ -1,3 +1,5 @@
+// vim: set foldmethod=marker :
+// Global variables. {{{
 var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _mainscreen, _footer, _title_selection, _canvas;
 var _gametitle;
 var _title_screen;
@@ -9,8 +11,9 @@ var mouse_navigation = true;
 var my_name = null;
 var _players = [], _playerdiv;
 var viewport = [-20, -15, 20, 15];
+// }}}
 
-AddEvent('load', function () {
+AddEvent('load', function () { // {{{
 	_title_screen = true;
 	_gametitle = document.title;
 	_titlescreen = document.getElementById('title');
@@ -35,9 +38,9 @@ AddEvent('load', function () {
 	please.set_search_path('glsl', root + 'glsl');
 	please.set_search_path('text', root + 'text');
 #LOAD#
-});
+}); // }}}
 
-AddEvent('mgrl_media_ready', please.once(function () {
+AddEvent('mgrl_media_ready', please.once(function () { // {{{
 	window.graph = new please.SceneGraph();
 	window.camera = new please.CameraNode();
 	graph.add(camera);
@@ -179,20 +182,20 @@ AddEvent('mgrl_media_ready', please.once(function () {
 	if (!use_3d && window.init_2d !== undefined) window.init_2d();
 	if (use_3d && window.init_3d !== undefined) window.init_3d();
 	if (window.init !== undefined) window.init();
-}));
+})); // }}}
 
-AddEvent('mgrl_dom_context_changed', function () {
+AddEvent('mgrl_dom_context_changed', function () { // {{{
 	if (window.update_canvas && !use_3d)
 		window.update_canvas(please.dom.context);
-});
+}); // }}}
 
-function playercolor(num) {
+function playercolor(num) { // {{{
 	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
 	num %= colors.length;
 	return colors[num];
-}
+} // }}}
 
-function _public_update(path, value) {
+function _public_update(path, value) { // {{{
 	if (path !== undefined) {
 		if (path.length == 0) {
 			Public = value;
@@ -271,9 +274,9 @@ function _public_update(path, value) {
 		window.public_update();
 	if (window.update !== undefined)
 		window.update();
-}
+} // }}}
 
-function title_make_option(select, name, n) {
+function title_make_option(select, name, n) { // {{{
 	var ret = Create('option').AddText(name);
 	ret.value = name;
 	if (n >= select.options.length) {
@@ -283,23 +286,23 @@ function title_make_option(select, name, n) {
 		select.insertBefore(ret, select.options[n]);
 	}
 	return ret;
-}
+} // }}}
 
-function _title_join() {
+function _title_join() { // {{{
 	var game = title_select.options[title_select.selectedIndex].value;
 	server.call('join', [game]);
-}
+} // }}}
 
-function _title_view() {
+function _title_view() { // {{{
 	var game = title_select.options[title_select.selectedIndex].value;
 	server.call('view', [game]);
-}
+} // }}}
 
-function _title_new() {
+function _title_new() { // {{{
 	server.call('new', [document.getElementById('title_game_name').value, Number(document.getElementById('title_num_players').value)]);
-}
+} // }}}
 
-function _private_update(path, value) {
+function _private_update(path, value) { // {{{
 	if (path !== undefined) {
 		if (path.length == 0) {
 			Private = value;
@@ -326,13 +329,13 @@ function _private_update(path, value) {
 		window.private_update();
 	if (window.update !== undefined)
 		window.update();
-}
+} // }}}
 
-function _leave() {
+function _leave() { // {{{
 	server.call('leave');
-}
+} // }}}
 
-function _makestate() {
+function _makestate() { // {{{
 	_state.ClearAll().AddText((Public.state || '') + ((Private && Private.state) || ''));
 	if (!Public.players)
 		return;
@@ -351,12 +354,12 @@ function _makestate() {
 				_players[p][0].RemoveClass('self');
 		}
 	}
-}
+} // }}}
 
 var _canvas_list = [];
 var _div_list = [];
 
-function new_canvas(w, h, name, redraw) {
+function new_canvas(w, h, name, redraw) { // {{{
 	var div = please.overlay.new_element(name);
 	var node = new please.GraphNode();
 	node.div = div;
@@ -385,15 +388,15 @@ function new_canvas(w, h, name, redraw) {
 	});
 	node.canvas.redraw_func();
 	return node;
-}
+} // }}}
 
-function del_canvas(node) {
+function del_canvas(node) { // {{{
 	_canvas_list.splice(_canvas_list.indexOf(node.canvas), 1);
 	graph.remove(node);
 	please.overlay.remove_element(node.div);
-}
+} // }}}
 
-function new_div(w, h, pw, ph, name, redraw) {
+function new_div(w, h, pw, ph, name, redraw) { // {{{
 	var div = please.overlay.new_element(name);
 	var node = new please.GraphNode();
 	node.div = div;
@@ -415,15 +418,15 @@ function new_div(w, h, pw, ph, name, redraw) {
 	});
 	div.redraw_func();
 	return node;
-}
+} // }}}
 
-function del_div(node) {
+function del_div(node) { // {{{
 	_div_list.splice(_div_list.indexOf(node.div), 1);
 	graph.remove(node);
 	please.overlay.remove_element(node.div);
-}
+} // }}}
 
-function _resize_window() {
+function _resize_window() { // {{{
 	var size = [_mainscreen.clientWidth, _mainscreen.clientHeight];
 	if (size[0] == 0 || size[1] == 0)
 		return;
@@ -446,16 +449,16 @@ function _resize_window() {
 		}
 	}
 	please.__align_canvas_overlay();
-}
+} // }}}
 
-window.AddEvent('mgrl_overlay_aligned', function () {
+window.AddEvent('mgrl_overlay_aligned', function () { // {{{
 	for (var c = 0; c < _canvas_list.length; ++c)
 		_canvas_list[c].redraw_func();
 	for (var d = 0; d < _div_list.length; ++d)
 		_div_list[d].redraw_func();
-});
+}); // }}}
 
-window.AddEvent('mgrl_dom_context_changed', function() {
+window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 	if (window.update_canvas && !use_3d)
 		window.update_canvas(please.dom.context);
-});
+}); // }}}
