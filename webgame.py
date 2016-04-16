@@ -1,5 +1,7 @@
 # Webgame module.
+# vim: set foldmethod=marker :
 
+# Imports. {{{
 import websocketd
 from websocketd import log
 import fhs
@@ -9,12 +11,14 @@ import time
 import json
 import __main__
 import collections
+# }}}
 
 fhs.module_init('webgame', {'port': 8891, 'tls': False})
 
 server = None
 
-class Shared_Object(collections.MutableMapping):
+# Shared object handling. {{{
+class Shared_Object(collections.MutableMapping): # {{{
 	def __init__(self, path, target, group):
 		self.__dict__['_path'] = path
 		self.__dict__['_target'] = target
@@ -72,8 +76,9 @@ class Shared_Object(collections.MutableMapping):
 			else:
 				ret[k] = v
 		return ret
+# }}}
 
-class Shared_Array(collections.MutableSequence):
+class Shared_Array(collections.MutableSequence): # {{{
 	def __init__(self, path, target, group):
 		self.path = path
 		self.target = target
@@ -147,8 +152,9 @@ class Shared_Array(collections.MutableSequence):
 			else:
 				ret.append(v)
 		return ret
+# }}}
 
-def make_shared(parent_path, target, key, value, send, group):
+def make_shared(parent_path, target, key, value, send, group): # {{{
 	path = parent_path.copy()
 	path.append(key)
 	if isinstance(value, (tuple, list)):
@@ -173,8 +179,9 @@ def make_shared(parent_path, target, key, value, send, group):
 			if target is None or target.connection is not None:
 				broadcast_shared(target and target.connection, path, newvalue, group)
 	return newvalue
+# }}}
 
-def broadcast_shared(target, path, value, group = None):
+def broadcast_shared(target, path, value, group = None): # {{{
 	if isinstance(value, Shared_Object):
 		assert group is None or group is value._group
 		group = value._group
@@ -199,13 +206,10 @@ def broadcast_shared(target, path, value, group = None):
 			#log('private %s %s' % (repr(path), repr(value)))
 			# Send private information for target that is controlling the correct player.
 			target._socket.private_update.event(path[1:], value)
+# }}}
+# }}}
 
-# Scheduled timeouts, stored as (absolute time, generator).
-timeouts = []
-
-# Programs to run without a game context.
-queue = []
-
+# Global variables. {{{
 # All connections (both viewers and players); keys are names.
 connections = {}
 
@@ -219,9 +223,6 @@ have_3d = None
 # Generator type, for checking if things are generators.
 generator_type = type((lambda: (yield))())
 
-# Flag to allow quit() to stop the server.
-running = True
-
 # All currently running games.
 instances = {}
 
@@ -230,12 +231,15 @@ title_game = None
 
 # Commands that work always.
 cmds = {}
+# }}}
 
-class Player:
+class Player: # Class for player objects. {{{
 	pass
+# }}}
 
-class Instance:
+class Instance: # Class for game instances. {{{
 	def __init__(self, cls, name, num_players = None):
+		self.timeouts = {}
 		self.game = cls()
 		n = name
 		i = 0
@@ -248,8 +252,6 @@ class Instance:
 			self.game.add_player = lambda: self.add_player()
 		if not hasattr(self.game, 'remove_player'):
 			self.game.remove_player = lambda p: self.remove_player(p)
-		# Generators which are waiting to be called, stored as (generator, arg) tuples.
-		self.queue = []
 		# Allowed commands at this time.  Keys are command names, values are tuples of
 		# (function to call or int or sequence of ints) and (generator to resume, or None).
 		# Ints are players that are allowed to use this command.
@@ -274,7 +276,7 @@ class Instance:
 		for p in range(num_players):
 			self.game.add_player()
 		# Start game.
-		self.queue.append((self.game.run(), None))
+		self.run(time.time(), self.game.run(), None)
 		log("started new instance '%s'" % name)
 
 	def close(self):
@@ -300,6 +302,7 @@ class Instance:
 			self.close()
 
 	def run(self, now, f, arg):
+		self.cleanup(f)
 		self.game.now = now
 		if type(f) == generator_type:
 			try:
@@ -328,8 +331,7 @@ class Instance:
 		#log('new cmd: %s' % repr(cmd))
 		# Schedule new timeout.
 		if None in cmd:
-			timeouts.append((cmd.pop(None), (self, f)))
-			timeouts.sort()
+			self.timeouts[f] = websocketd.add_timeout(cmd.pop(None), lambda: self.timeouts.pop(f) and self.run(time.time(), f, None))
 		# Add new commands.
 		for c in cmd:
 			assert c not in self.cmds
@@ -338,8 +340,8 @@ class Instance:
 	def cleanup(self, f):
 		for k in [x for x in self.cmds if self.cmds[x][1] is f]:
 			self.cmds.pop(k)
-		for t in [x for x in timeouts if x[1] is (self, f)]:
-			timeouts.remove(t)
+		if f in self.timeouts:
+			websocketd.remove_timeout(self.timeouts.pop(f))
 
 	def add_player(self):
 		#log('%s %s %s' % (self.game.public.name, self.game.players, self.game.max_players))
@@ -365,16 +367,17 @@ class Instance:
 		self.game.public.players.pop(p)
 		self.game.players.pop(p)
 
-	# Call a function or generator, with arguments.
-	# The return value is discarded.
 	def launch(self, f, *a, **ka):
+		'''Call a function or generator, with arguments.
+		The return value is discarded.'''
 		fn = f(*a, **ka)
-		# If it's a generator, add it to the queue.
+		# If it's a generator, run it.
 		# If not, ignore the return value.
 		if type(fn) == generator_type:
-			self.queue.append((fn, None))
+			self.run(time.time(), fn, None)
+# }}}
 
-class Args(dict):
+class Args(dict): # Class for command arguments; ordered dict. {{{
 	def __init__(self, a, ka):
 		for k in ka:
 			self[k] = ka[k]
@@ -386,8 +389,9 @@ class Args(dict):
 	def __iter__(self):
 		for i in range(self.length):
 			yield self[i]
+# }}}
 
-class Connection:
+class Connection: # {{{
 	def __init__(self, socket):
 		self._socket = socket
 		if 'name' in socket.data['query']:
@@ -437,25 +441,24 @@ class Connection:
 				raise AttributeError('forbidden')
 			func = None
 		def wrap(*a, **ka):
-			if instance is not None:
-				instance.cleanup(f)
-			websocketd.endloop()
 			args = {'args': Args(a, ka), 'connection': self, 'player': self.num, 'command': attr}
 			if func is not None:
 				ret = func(args)
 			else:
 				ret = None
 			if f is not None:
+				instance.cleanup(f);
 				if instance is not None:
-					instance.queue.append((f, args))
+					instance.run(time.time(), f, args)
 				else:
-					queue.append((f, args))
+					assert f(args) is None
 			return ret
 		return wrap
+# }}}
 
-def page(connection): # {{{
+def page(connection): # Response function for non websocket requests.  Falls back to websocketd.RPChttpd.page. {{{
 	if any(connection.address.path == '/' + x for x in ('rpc.js', 'builders.js')):
-		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-websocketd').read())
+		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python3-websocketd').read())
 	elif any(connection.address.path == '/' + x for x in ('webgame.js', 'gl-matrix.js', 'mgrl.js')):
 		def makeaudio(dirobj, dir):
 			ret = []
@@ -478,9 +481,9 @@ def page(connection): # {{{
 			use_3d = False
 		else:
 			use_3d = True
-		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-webgame').read().replace(b'#3D#', b'true' if use_3d else b'false').replace(b'#LOAD#', loader_js[use_3d]).replace(b'#PREFIX#', (connection.prefix + '/').encode('utf-8')).replace(b'#AUDIO#', audio))
+		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python3-webgame').read().replace(b'#3D#', b'true' if use_3d else b'false').replace(b'#LOAD#', loader_js[use_3d]).replace(b'#PREFIX#', (connection.prefix + '/').encode('utf-8')).replace(b'#AUDIO#', audio))
 	elif connection.address.path == '/webgame.css':
-		server.reply_css(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python-webgame').read())
+		server.reply_css(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python3-webgame').read())
 	elif connection.address.path == '/':
 		files = []
 		for d in connection.server.httpdirs:
@@ -497,7 +500,7 @@ def page(connection): # {{{
 			else:
 				player_range = 'from %d to %d' % (__main__.min_players, __main__.max_players)
 			range_str = "Number of players: <input type='text' id='title_num_players'/> (%s)</span>" % player_range
-		server.reply_html(connection, fhs.read_data('webgame.html', text = False, packagename = 'python-webgame').read().replace(b'#NAME#', __main__.name.encode('utf-8')).replace(b'#BASE#', (connection.prefix + '/').encode('utf-8')).replace(b'#SOURCE#', b'\n\t\t'.join(files)).replace(b'#QUERY#', connection.address.query.encode('utf-8')).replace(b'#RANGE#', range_str.encode('utf-8')))
+		server.reply_html(connection, fhs.read_data('webgame.html', text = False, packagename = 'python3-webgame').read().replace(b'#NAME#', __main__.name.encode('utf-8')).replace(b'#BASE#', (connection.prefix + '/').encode('utf-8')).replace(b'#SOURCE#', b'\n\t\t'.join(files)).replace(b'#QUERY#', connection.address.query.encode('utf-8')).replace(b'#RANGE#', range_str.encode('utf-8')))
 	else:
 		if 'name' in connection.query:
 			connection.data['name'] = connection.query['name'][-1]
@@ -507,7 +510,7 @@ def page(connection): # {{{
 		websocketd.RPChttpd.page(server, connection, '/'.join(path))
 # }}}
 
-class Title:
+class Title: # Class for default title game object. {{{
 	def __init__(self):
 		self.min_players = 0
 		self.max_players = 0
@@ -570,8 +573,9 @@ class Title:
 			else:
 				log('impossible command')
 				continue
+# }}}
 
-def leave(args):
+def leave(args): # Player leaves the game.  This is always available except from the title game. {{{
 	connection = args['connection']
 	if connection.instance is title_game:
 		return
@@ -589,10 +593,10 @@ def leave(args):
 	broadcast_shared(connection, ['private'], None, title_game.game.public.name)
 	if end:
 		end.close()
+# }}}
 
-# Main function to start a game.  Pass commands that always work, if any.
-def Game(cmd = {}, title = Title):
-	global server, running, title_game, have_2d, have_3d
+def Game(cmd = {}, title = Title): # Main function to start a game.  Pass commands that always work, if any. {{{
+	global server, title_game, have_2d, have_3d
 	# Set up the game name.
 	if not hasattr(__main__, 'name') or __main__.name is None:
 		__main__.name = os.path.basename(sys.argv[0]).capitalize()
@@ -648,37 +652,6 @@ def Game(cmd = {}, title = Title):
 	title_game = Instance(title, '')
 	log('Game "%s" started' % __main__.name)
 	# Main loop.
-	while running:
-		now = time.time()
-		# Run all events for which the timeout has expired by now.
-		while len(timeouts) > 0 and timeouts[0][0] < now:
-			instance, f = timeouts.pop(0)[1]
-			if f is not None:
-				if instance is not None:
-					instance.cleanup(f)
-					instance.queue.append((f, None))
-				else:
-					queue.append((f, None))
-			else:
-				log('None timeout callback?')
-		# Handle queue.
-		while len(queue) > 0 or any(len(i.queue) > 0 for i in instances.values()):
-			while len(queue) > 0:
-				# Global commands must be functions, not generators, and cannot schedule new events.
-				c, a = queue.pop(0)
-				assert c(a) is None
-			#log('running instance generators %s' % repr(instances))
-			for i in tuple(instances.keys()):
-				#log('> %s' % i)
-				while i in instances and len(instances[i].queue) > 0:
-					#log(': %s' % repr(instances[i].queue[0]))
-					instances[i].run(now, *instances[i].queue.pop(0))
-		# Wait for an event.
-		#log('waiting for %s' % repr(cmds))
-		websocketd.fgloop(None if len(timeouts) == 0 else timeouts[0][0] - now)
+	websocketd.fgloop()
 	# End of game.  Do anything to clean up?
-
-def quit():
-	global running
-	running = False
-	log('quit at user request')
+# }}}

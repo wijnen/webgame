@@ -10,4 +10,4 @@ override_dh_auto_install:
 	# Copy external sources into the package.
 	# They should really be packaged separately.
 	mkdir -p debian/python3-webgame/usr/share/python3-webgame/html/
-	cp -L html/mgrl.js html/gl-matrix.js debian/python3-webgame/usr/share/python3-webgame/html/
+	cp -L html/mgrl.js html/gl-matrix.js debian/python3-webgame/usr/share/python3-webgame
