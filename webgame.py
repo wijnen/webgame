@@ -318,9 +318,9 @@ class Instance: # Class for game instances. {{{
 			self.end_game(None)
 			return
 		# Convert cmd to dict if it isn't.
-		if isinstance(cmd, str):
-			cmd = {cmd: None}
-		elif isinstance(cmd, (tuple, list)):
+		if not isinstance(cmd, (tuple, list, set, frozenset, dict)):
+			cmd = (cmd,)
+		if isinstance(cmd, (tuple, list, set, frozenset)):
 			def mkcmd(src):
 				for c in src:
 					if isinstance(c, str):
@@ -473,10 +473,10 @@ def page(connection): # Response function for non websocket requests.  Falls bac
 					ret.append((dirobj, f, os.path.splitext(f)[0]))
 			return ret
 		audio = json.dumps(makeaudio([], fhs.read_data(os.path.join('html', 'audio'), text = False, opened = False, dir = True))).encode('utf-8')
-		if not have_3d:
-			use_3d = False
-		elif not have_2d:
+		if not have_2d:
 			use_3d = True
+		elif not have_3d:
+			use_3d = False
 		elif '2d' in connection.query:
 			use_3d = False
 		else:
@@ -606,8 +606,8 @@ def Game(cmd = {}, title = Title): # Main function to start a game.  Pass comman
 	# Set up other constants.
 	if not hasattr(__main__, 'autokill'):
 		__main__.autokill = True
-	have_3d = fhs.read_data(os.path.join('html', '3d'), dir = True, opened = False) is not None
-	have_2d = fhs.read_data(os.path.join('html', '2d'), dir = True, opened = False) is not None or not have_3d
+	have_2d = fhs.read_data(os.path.join('html', '2d'), dir = True, opened = False) is not None
+	have_3d = fhs.read_data(os.path.join('html', '3d'), dir = True, opened = False) is not None or not have_2d
 	# Fill in min and max if not specified.
 	if hasattr(__main__, 'num_players'):
 		assert isinstance(__main__.num_players, int)
@@ -648,6 +648,9 @@ def Game(cmd = {}, title = Title): # Main function to start a game.  Pass comman
 	server.handle_ext('mp3', 'audio/mp3')
 	server.handle_ext('jta', 'application/octet-stream')
 	server.handle_ext('txt', 'text/plain')
+	server.handle_ext('frag', 'text/plain')
+	server.handle_ext('vert', 'text/plain')
+	server.handle_ext('glsl', 'text/plain')
 	# Set up title page.
 	title_game = Instance(title, '')
 	log('Game "%s" started' % __main__.name)

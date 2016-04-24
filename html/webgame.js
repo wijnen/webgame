@@ -60,9 +60,6 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 		prog.vars.light_direction = light_direction;
 		var renderer = new please.RenderNode('default');
 		renderer.graph = graph;
-		please.pipeline.add(1, 'main/draw', function () {
-			please.render(renderer);
-		});
 		window.camera_base = new please.GraphNode();
 		graph.add(camera_base);
 		camera.look_at = camera_base;
@@ -125,9 +122,6 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 		}
 	}
 	else {
-		please.pipeline.add(1, 'main/draw', function() {
-			graph.draw();
-		});
 	}
 	camera.activate();
 
@@ -177,7 +171,7 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 	server = Rpc(messages,
 		function() { _body.RemoveClass('disconnected'); },
 		function() { _body.AddClass('disconnected'); });
-	please.pipeline.start();
+	please.set_viewport(renderer);
 	window.AddEvent('resize', _resize_window);
 	if (!use_3d && window.init_2d !== undefined) window.init_2d();
 	if (use_3d && window.init_3d !== undefined) window.init_3d();
