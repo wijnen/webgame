@@ -39,15 +39,15 @@ class Shared_Object(collections.MutableMapping): # {{{
 		if self.alive:
 			path = self._path[1:] + [key]
 			if self._target is None:
-				assert self._path[0] == 'public'
-				server.broadcast[self._group].public_update(path)
-			elif self._path[0] == 'public':
+				assert self._path[0] == 'Public'
+				server.broadcast[self._group].Public_update(path)
+			elif self._path[0] == 'Public':
 				assert self._group in self._target.connection._socket.groups
 				if self._target.connection:
-					self._target.connection._socket.public_update.event(path)
+					self._target.connection._socket.Public_update.event(path)
 			else:
 				if self._target.connection:
-					self._target.connection._socket.private_update.event(path)
+					self._target.connection._socket.Private_update.event(path)
 	def __getitem__(self, key):
 		return getattr(self, key)
 	def __setitem__(self, key, value):
@@ -106,15 +106,15 @@ class Shared_Array(collections.MutableSequence): # {{{
 		if self.alive:
 			path = self.path[1:] + ['length']
 			if self.target is None:
-				assert self.path[0] == 'public'
-				server.broadcast[self.group].public_update(path, len(self.data))
-			elif self.path[0] == 'public':
+				assert self.path[0] == 'Public'
+				server.broadcast[self.group].Public_update(path, len(self.data))
+			elif self.path[0] == 'Public':
 				assert self.group in self.target.connection._socket.groups
 				if self.target.connection:
-					self.target.connection._socket.public_update.event(path, len(self.data))
+					self.target.connection._socket.Public_update.event(path, len(self.data))
 			else:
 				if self.target.connection:
-					self.target.connection._socket.private_update.event(path, len(self.data))
+					self.target.connection._socket.Private_update.event(path, len(self.data))
 	def __lt__(self, other):
 		return list(self) < list(other)
 	def __len__(self):
@@ -192,20 +192,20 @@ def broadcast_shared(target, path, value, group = None): # {{{
 		value = value._json()
 	if target is None:
 		assert group is not None
-		assert path[0] == 'public'
+		assert path[0] == 'Public'
 		# Send public update to everyone.
 		#log('broadcast %s %s' % (repr(path), repr(value)))
-		server.broadcast[group].public_update(path[1:], value)
+		server.broadcast[group].Public_update(path[1:], value)
 	else:
-		if path[0] == 'public':
+		if path[0] == 'Public':
 			assert group in target._socket.groups
-			#log('public %s %s' % (repr(path), repr(value)))
+			#log('Public %s %s' % (repr(path), repr(value)))
 			# Send public information to target.
-			target._socket.public_update.event(path[1:], value)
+			target._socket.Public_update.event(path[1:], value)
 		else:
-			#log('private %s %s' % (repr(path), repr(value)))
+			#log('Private %s %s' % (repr(path), repr(value)))
 			# Send private information for target that is controlling the correct player.
-			target._socket.private_update.event(path[1:], value)
+			target._socket.Private_update.event(path[1:], value)
 # }}}
 # }}}
 
@@ -231,16 +231,30 @@ title_game = None
 
 # Commands that work always.
 cmds = {}
+
+# Number of players; this is created from __main__.num_players.
+_num_players = None
 # }}}
 
 class Player: # Class for player objects. {{{
 	pass
 # }}}
 
+class Task: # Class for parallel tasks. {{{
+	def __init__(self, generator, name):
+		self.generator = generator
+		self.name = name
+		self.waiters = []
+		self.done = False
+		self.value = None
+# }}}
+
 class Instance: # Class for game instances. {{{
 	def __init__(self, cls, name, num_players = None):
 		self.timeouts = {}
+		self.tasks = []
 		self.game = cls()
+		self.game.launch = self.launch
 		n = name
 		i = 0
 		while name in instances:
@@ -257,42 +271,43 @@ class Instance: # Class for game instances. {{{
 		# Ints are players that are allowed to use this command.
 		self.cmds = {}
 		self.ended = False
-		# Initialize public variables.
-		self.game.public = Shared_Object(['public'], None, name)
-		self.game.public._live()
-		self.game.public.name = name
-		self.game.public.players = []
+		# Initialize Public variables.
+		self.game.Public = Shared_Object(['Public'], None, name)
+		self.game.Public._live()
+		self.game.Public.name = name
+		self.game.Public.players = []
 		# Set up players.
 		if cls is not Title:
-			if not hasattr(self.game, 'min_players'):
-				self.game.min_players = __main__.min_players
-			if not hasattr(self.game, 'max_players'):
-				self.game.max_players = __main__.max_players
-			num_players = num_players or __main__.min_players
-			title_game.game.public.games.append(name)
+			if num_players is None:
+				num_players = _num_players[0]
+			if num_players < _num_players[0]:
+				num_players = _num_players[0]
+			if num_players > _num_players[1]:
+				num_players = _num_players[1]
+			title_game.game.Public.games.append(name)
 		else:
 			num_players = 0
 		self.game.players = []
 		for p in range(num_players):
 			self.game.add_player()
 		# Start game.
-		self.run(time.time(), self.game.run(), None)
+		self.launch(self.game.run(), 'main')
 		log("started new instance '%s'" % name)
 
 	def close(self):
-		if self.game.public.name not in instances:
+		if self.game.Public.name not in instances:
 			# Already closed.
 			return
-		log("stopped instance '%s'" % self.game.public.name)
-		del instances[self.game.public.name]
+		log("stopped instance '%s'" % self.game.Public.name)
+		del instances[self.game.Public.name]
 		for c in connections:
 			if connections[c].instance != self:
 				continue
 			leave({'connection': connections[c]})
-		self.game.public._die()
+		self.game.Public._die()
 		for p in self.game.players:
-			p.private._die()
-		title_game.game.public.games.remove(self.game.public.name)
+			p.Private._die()
+		title_game.game.Public.games.remove(self.game.Public.name)
 
 	def end_game(self, code):
 		#log('done')
@@ -301,21 +316,24 @@ class Instance: # Class for game instances. {{{
 		if all(p.connection is None for p in self.game.players):
 			self.close()
 
-	def run(self, now, f, arg):
-		self.cleanup(f)
-		self.game.now = now
-		if type(f) == generator_type:
-			try:
-				#log('sending %s' % repr(arg))
-				cmd = f.send(arg)
-			except StopIteration as e:
-				self.end_game(e.value)
-				return
-		else:
-			cmd = f(arg)
+	def run(self, task, arg):
+		self.cleanup(task)
+		self.game.now = time.time()
+		end_task = (False, None)
+		try:
+			#log('sending %s' % repr(arg))
+			cmd = task.generator.send(arg)
+		except StopIteration as e:
+			task.value = e.value
+			task.done = True
+			end_task = (True, e.value)
 		#log('cmd = %s' % repr(cmd))
-		if cmd is None:
-			self.end_game(None)
+		if end_task[0] or cmd is None:
+			for t in task.waiters:
+				websocketd.idle_add(lambda: self.run(t, end_task[1]))
+			self.tasks.remove(task)
+			if len(self.tasks) == 0:
+				self.end_game(end_task[1])
 			return
 		# Convert cmd to dict if it isn't.
 		if not isinstance(cmd, (tuple, list, set, frozenset, dict)):
@@ -323,58 +341,72 @@ class Instance: # Class for game instances. {{{
 		if isinstance(cmd, (tuple, list, set, frozenset)):
 			def mkcmd(src):
 				for c in src:
-					if isinstance(c, str):
+					if isinstance(c, (Task, str)):
 						yield (c, None)
 					else:
 						yield (None, c)
 			cmd = {x: y for x, y in mkcmd(cmd)}
 		#log('new cmd: %s' % repr(cmd))
+		# Check if we're waiting for a task that is already finished.
+		for c in cmd:
+			if isinstance(c, Task) and c.done:
+				websocketd.idle_add(lambda: self.run(task, c.value))
+				return
 		# Schedule new timeout.
 		if None in cmd:
-			self.timeouts[f] = websocketd.add_timeout(cmd.pop(None), lambda: self.timeouts.pop(f) and self.run(time.time(), f, None))
+			self.timeouts[task] = websocketd.add_timeout(cmd.pop(None), lambda: self.timeouts.pop(task) and self.run(task, None))
+		# Add waiters to tasks.
+		for c in cmd:
+			if not isinstance(c, Task):
+				continue
+			c.waiters.append(task)
 		# Add new commands.
 		for c in cmd:
-			assert c not in self.cmds
-			self.cmds[c] = (cmd[c], f)
+			if isinstance(c, Task):
+				continue
+			if c in self.cmds:
+				assert task not in self.cmds[c]
+			else:
+				self.cmds[c] = {}
+			self.cmds[c][task] = cmd[c]
 
-	def cleanup(self, f):
-		for k in [x for x in self.cmds if self.cmds[x][1] is f]:
-			self.cmds.pop(k)
-		if f in self.timeouts:
-			websocketd.remove_timeout(self.timeouts.pop(f))
+	def cleanup(self, task):
+		for k in [x for x in self.cmds if task in self.cmds[x]]:
+			del self.cmds[k][task]
+		if task in self.timeouts:
+			websocketd.remove_timeout(self.timeouts.pop(task))
+		for t in [x for x in self.tasks if task in x.waiters]:
+			t.remove(task)
 
 	def add_player(self):
-		#log('%s %s %s' % (self.game.public.name, self.game.players, self.game.max_players))
-		assert self.game.max_players is None or len(self.game.players) < self.game.max_players
+		assert _num_players[1] is None or len(self.game.players) < _num_players[1]
 		p = Player()
 		p.connection = None
-		p.private = Shared_Object(['private'], p, self.game.public.name)
-		p.private._live()
+		p.Private = Shared_Object(['Private'], p, self.game.Public.name)
+		p.Private._live()
 		#log('appending %s' % p)
 		self.game.players.append(p)
-		self.game.public.players.append({})
+		self.game.Public.players.append({})
 		return len(self.game.players) - 1
 
 	def remove_player(self, p):
-		assert len(self.game.players) > self.game.min_players
+		assert len(self.game.players) > _num_players[0]
 		assert p < len(self.game.players)
 		if self.game.players[p].connection is not None:
 			self.game.players[p].connection.num = None
 			self.game.players[p].connection.game = None
 			self.game.players[p].connection.socket.end_game.event()
 			self.game.players[p].connection = None
-		self.game.players[p].private._die()
-		self.game.public.players.pop(p)
+		self.game.players[p].Private._die()
+		self.game.Public.players.pop(p)
 		self.game.players.pop(p)
 
-	def launch(self, f, *a, **ka):
-		'''Call a function or generator, with arguments.
-		The return value is discarded.'''
-		fn = f(*a, **ka)
-		# If it's a generator, run it.
-		# If not, ignore the return value.
-		if type(fn) == generator_type:
-			self.run(time.time(), fn, None)
+	def launch(self, f, name = 'nameless task'):
+		'''Record a generator as a task and schedule it for idle running.'''
+		t = Task(f, name)
+		self.tasks.append(t)
+		websocketd.add_idle(lambda: self.run(t, None))
+		return t
 # }}}
 
 class Args(dict): # Class for command arguments; ordered dict. {{{
@@ -406,16 +438,16 @@ class Connection: # {{{
 		connections[self.name] = self
 		self._socket.closed = self._closed
 		self.instance = title_game
-		self._socket.groups.add(title_game.game.public.name)
+		self._socket.groups.add(title_game.game.Public.name)
 		self.num = None
 		# Inform about state.
 		self._socket.name.event(self.name)
-		broadcast_shared(self, ['public'], self.instance.game.public)
-		broadcast_shared(self, ['private'], None, title_game.game.public.name)
+		broadcast_shared(self, ['Public'], self.instance.game.Public)
+		broadcast_shared(self, ['Private'], None, title_game.game.Public.name)
 	def _closed(self):
 		if self.num is not None:
 			self.instance.game.players[self.num].connection = None
-			self.instance.game.public.players[self.num]['name'] = None
+			self.instance.game.Public.players[self.num]['name'] = None
 			if __main__.autokill and all(p.connection is None for p in self.instance.game.players):
 				# Last player left; destroy game.
 				self.instance.close()
@@ -426,33 +458,33 @@ class Connection: # {{{
 		if attr.startswith('_'):
 			raise AttributeError('invalid attribute name for getattr')
 		if attr in cmds:
-			func, f = cmds[attr]
+			queue = cmds[attr]
 			instance = None
 		elif self.instance is not None and attr in self.instance.cmds:
-			func, f = self.instance.cmds[attr]
+			queue = self.instance.cmds[attr]
 			instance = self.instance
 		else:
 			log('attribute not found: %s not in %s %s' % (attr, repr(cmds), repr(self.instance.cmds)))
 			raise AttributeError('attribute %s not found' % attr)
-		if isinstance(func, int):
-			func = (func,)
-		if isinstance(func, (tuple, list)):
-			if self.num not in func:
-				raise AttributeError('forbidden')
-			func = None
 		def wrap(*a, **ka):
-			args = {'args': Args(a, ka), 'connection': self, 'player': self.num, 'command': attr}
-			if func is not None:
-				ret = func(args)
-			else:
-				ret = None
-			if f is not None:
-				instance.cleanup(f);
-				if instance is not None:
-					instance.run(time.time(), f, args)
-				else:
-					assert f(args) is None
-			return ret
+			action = False
+			for task in queue.copy():
+				func = queue[task]
+				if isinstance(func, int):
+					func = (func,)
+				if isinstance(func, (tuple, list)):
+					if self.num not in func:
+						continue
+					func = None
+				action = True
+				args = {'args': Args(a, ka), 'connection': self, 'player': self.num, 'command': attr}
+				if func is not None:
+					websocketd.add_idle(lambda: func(args) and False)
+				if task is not None:
+					instance.cleanup(task);
+					websocketd.add_idle(lambda: instance.run(task, args))
+			if not action:
+				raise AttributeError('forbidden')
 		return wrap
 # }}}
 
@@ -492,13 +524,13 @@ def page(connection): # Response function for non websocket requests.  Falls bac
 					continue
 				files.append(("<script type='application/javascript' src='%s'></script>" % f).encode('utf-8'))
 		files.sort()
-		if __main__.min_players == __main__.max_players:
-			range_str = "<input id='title_num_players' type='hidden' value='%d'/>" % __main__.min_players
+		if _num_players[0] == _num_players[1]:
+			range_str = "<input id='title_num_players' type='hidden' value='%d'/>" % _num_players[0]
 		else:
-			if __main__.max_players is None:
-				player_range = '%d or more' % __main__.min_players
+			if _num_players[1] is None:
+				player_range = '%d or more' % _num_players[0]
 			else:
-				player_range = 'from %d to %d' % (__main__.min_players, __main__.max_players)
+				player_range = 'from %d to %d' % (_num_players[0], _num_players[1])
 			range_str = "Number of players: <input type='text' id='title_num_players'/> (%s)</span>" % player_range
 		server.reply_html(connection, fhs.read_data('webgame.html', text = False, packagename = 'python3-webgame').read().replace(b'#NAME#', __main__.name.encode('utf-8')).replace(b'#BASE#', (connection.prefix + '/').encode('utf-8')).replace(b'#SOURCE#', b'\n\t\t'.join(files)).replace(b'#QUERY#', connection.address.query.encode('utf-8')).replace(b'#RANGE#', range_str.encode('utf-8')))
 	else:
@@ -512,11 +544,10 @@ def page(connection): # Response function for non websocket requests.  Falls bac
 
 class Title: # Class for default title game object. {{{
 	def __init__(self):
-		self.min_players = 0
-		self.max_players = 0
+		self.num_players = 0
 	def run(self):
-		self.public.title = __main__.name
-		self.public.games = []
+		self.Public.title = __main__.name
+		self.Public.games = []
 		while True:
 			cmd = (yield ('new', 'join', 'return', 'view'))
 			connection = cmd['connection']
@@ -528,7 +559,7 @@ class Title: # Class for default title game object. {{{
 				continue
 			if command == 'new':
 				i = Instance(__main__.Game, *cmd['args'])
-				cmd['args'][0] = i.game.public.name
+				cmd['args'][0] = i.game.Public.name
 				command = 'join'	# fall through.
 			if cmd['args'][0] not in instances:
 				log("game doesn't exist")
@@ -540,18 +571,19 @@ class Title: # Class for default title game object. {{{
 						connection.num = i
 						break
 				else:
-					if len(instance.game.players) < instance.game.max_players:
+					if len(instance.game.players) < _num_players[1]:
 						connection.num = instance.game.add_player()
 					else:
 						log('no more players allowed')
 						continue
 				connection.instance = instance
 				instance.game.players[connection.num].connection = connection
-				connection._socket.groups.remove(self.public.name)
+				instance.game.Public.players[connection.num]['name'] = connection.name
+				connection._socket.groups.remove(self.Public.name)
 				connection._socket.groups.add(cmd['args'][0])
-				broadcast_shared(connection, ['public'], connection.instance.game.public)
-				connection.instance.game.public.players[connection.num]['name'] = connection.name
-				broadcast_shared(connection, ['private'], connection.instance.game.players[connection.num].private)
+				# Private must be sent before Public, because when Public.name is set, all shared variables must be available.
+				broadcast_shared(connection, ['Private'], connection.instance.game.players[connection.num].Private)
+				broadcast_shared(connection, ['Public'], connection.instance.game.Public)
 			elif command == 'return':
 				if len(cmd['args']) < 2 or cmd['args'][1] >= len(instance.game.players) or instance.game.players[cmd['args'][1]].connection is not None:
 					log('invalid player number to return to')
@@ -559,17 +591,17 @@ class Title: # Class for default title game object. {{{
 				connection.instance = instance
 				connection.num = cmd['args'][1]
 				instance.game.players[cmd['args'][1]].connection = connection
-				connection._socket.groups.remove(self.public.name)
+				connection._socket.groups.remove(self.Public.name)
 				connection._socket.groups.add(cmd['args'][0])
-				broadcast_shared(connection, ['public'], connection.instance.game.public)
-				connection.instance.game.public.players[connection.num]['name'] = connection.name
-				broadcast_shared(connection, ['private'], connection.instance.game.players[connection.num].private)
+				broadcast_shared(connection, ['Public'], connection.instance.game.Public)
+				connection.instance.game.Public.players[connection.num]['name'] = connection.name
+				broadcast_shared(connection, ['Private'], connection.instance.game.players[connection.num].Private)
 			elif command == 'view':
 				connection.instance = instance
-				connection._socket.groups.remove(self.public.name)
+				connection._socket.groups.remove(self.Public.name)
 				connection._socket.groups.add(cmd['args'][0])
-				broadcast_shared(connection, ['public'], connection.instance.game.public)
-				broadcast_shared(connection, ['private'], None)
+				broadcast_shared(connection, ['Public'], connection.instance.game.Public)
+				broadcast_shared(connection, ['Private'], None)
 			else:
 				log('impossible command')
 				continue
@@ -585,18 +617,18 @@ def leave(args): # Player leaves the game.  This is always available except from
 		if (__main__.autokill or connection.instance.ended) and all(p.connection is None for p in connection.instance.game.players):
 			# Last player left; destroy game if it was still running.
 			end = connection.instance
-	connection._socket.groups.remove(connection.instance.game.public.name)
+	connection._socket.groups.remove(connection.instance.game.Public.name)
 	connection.instance = title_game
-	connection._socket.groups.add(title_game.game.public.name)
+	connection._socket.groups.add(title_game.game.Public.name)
 	connection.num = None
-	broadcast_shared(connection, ['public'], connection.instance.game.public)
-	broadcast_shared(connection, ['private'], None, title_game.game.public.name)
+	broadcast_shared(connection, ['Public'], connection.instance.game.Public)
+	broadcast_shared(connection, ['Private'], None, title_game.game.Public.name)
 	if end:
 		end.close()
 # }}}
 
 def Game(cmd = {}, title = Title): # Main function to start a game.  Pass commands that always work, if any. {{{
-	global server, title_game, have_2d, have_3d
+	global server, title_game, have_2d, have_3d, _num_players
 	# Set up the game name.
 	if not hasattr(__main__, 'name') or __main__.name is None:
 		__main__.name = os.path.basename(sys.argv[0]).capitalize()
@@ -609,14 +641,12 @@ def Game(cmd = {}, title = Title): # Main function to start a game.  Pass comman
 	have_2d = fhs.read_data(os.path.join('html', '2d'), dir = True, opened = False) is not None
 	have_3d = fhs.read_data(os.path.join('html', '3d'), dir = True, opened = False) is not None or not have_2d
 	# Fill in min and max if not specified.
-	if hasattr(__main__, 'num_players'):
-		assert isinstance(__main__.num_players, int)
-		if not hasattr(__main__, 'min_players'):
-			__main__.min_players = __main__.num_players
-		if not hasattr(__main__, 'max_players'):
-			__main__.max_players = __main__.num_players
-	assert hasattr(__main__, 'min_players') and isinstance(__main__.min_players, int)
-	assert hasattr(__main__, 'max_players') and __main__.max_players is None or (isinstance(__main__.max_players, int) and __main__.max_players >= __main__.min_players)
+	assert hasattr(__main__, 'num_players')
+	if isinstance(__main__.num_players, int):
+		_num_players = (__main__.num_players, __main__.num_players)
+	else:
+		_num_players = __main__.num_players
+	assert 1 <= _num_players[0] and (_num_players[1] is None or _num_players[0] <= _num_players[1])
 	# Build asset string for inserting in js.
 	for subdir, use_3d in (('2d', False), ('3d', True)):
 		targets = []
@@ -630,9 +660,9 @@ def Game(cmd = {}, title = Title): # Main function to start a game.  Pass comman
 			# Nothing to load, but force the "finished loading" event to fire anyway.
 			loader_js[use_3d] = b'\twindow.dispatchEvent(new CustomEvent("mgrl_media_ready"));'
 	# Set up commands.
-	cmds['leave'] = (leave, None)
+	cmds['leave'] = {None: leave}
 	for c in cmd:
-		cmds[c] = (cmd[c], None)
+		cmds[c] = {None: cmd[c]}
 	# Start up websockets server.
 	config = fhs.module_get_config('webgame')
 	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html', os.path.join('html', '2d'), os.path.join('html', '3d'))]

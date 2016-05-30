@@ -153,8 +153,8 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 	_state = document.getElementById('state');
 	var messages = {
 		win: function(code) { if (window.win !== undefined) window.win(code); },
-		public_update: _public_update,
-		private_update: _private_update,
+		Public_update: _Public_update,
+		Private_update: _Private_update,
 		name: function(n) {
 			my_name = n;
 			document.getElementById('title_game_name').value = my_name;
@@ -189,7 +189,7 @@ function playercolor(num) { // {{{
 	return colors[num];
 } // }}}
 
-function _public_update(path, value) { // {{{
+function _Public_update(path, value) { // {{{
 	if (path !== undefined) {
 		if (path.length == 0) {
 			Public = value;
@@ -244,8 +244,8 @@ function _public_update(path, value) { // {{{
 		_mainscreen.AddClass('hidden');
 		_footer.AddClass('hidden');
 		please.renderer.overlay.AddClass('hidden');
-		if (window.title_public_update !== undefined)
-			window.title_public_update();
+		if (window.title_Public_update !== undefined)
+			window.title_Public_update();
 		if (window.title_update !== undefined)
 			window.title_update();
 		return;
@@ -264,8 +264,8 @@ function _public_update(path, value) { // {{{
 		if (window.new_game)
 			window.new_game();
 	}
-	if (window.public_update !== undefined)
-		window.public_update();
+	if (window.Public_update !== undefined)
+		window.Public_update();
 	if (window.update !== undefined)
 		window.update();
 } // }}}
@@ -296,7 +296,7 @@ function _title_new() { // {{{
 	server.call('new', [document.getElementById('title_game_name').value, Number(document.getElementById('title_num_players').value)]);
 } // }}}
 
-function _private_update(path, value) { // {{{
+function _Private_update(path, value) { // {{{
 	if (path !== undefined) {
 		if (path.length == 0) {
 			Private = value;
@@ -313,14 +313,14 @@ function _private_update(path, value) { // {{{
 	}
 	_makestate();
 	if (Public.name == '') {
-		if (window.title_private_update !== undefined)
-			window.title_private_update();
+		if (window.title_Private_update !== undefined)
+			window.title_Private_update();
 		if (window.title_update !== undefined)
 			window.title_update();
 		return;
 	}
-	if (window.private_update !== undefined)
-		window.private_update();
+	if (window.Private_update !== undefined)
+		window.Private_update();
 	if (window.update !== undefined)
 		window.update();
 } // }}}
@@ -440,6 +440,7 @@ function _resize_window() { // {{{
 				please.dom.orthographic_grid = size[0] / vw;
 			window.camera.orthographic_grid = please.dom.orthographic_grid;
 			please.dom.canvas_changed();
+			camera.update_camera();
 		}
 	}
 	please.__align_canvas_overlay();
