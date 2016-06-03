@@ -71,7 +71,10 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 		please.make_animatable(window, 'r', rx > ry ? rx : ry);
 		please.make_animatable(window, 'theta', -90);
 		please.make_animatable(window, 'phi', 30);
-		camera.location = function() { return [camera_base.location_x + r * Math.cos(please.radians(theta)) * Math.cos(please.radians(phi)), camera_base.location_y + r * Math.sin(please.radians(theta)) * Math.cos(please.radians(phi)), camera_base.location_z + r * Math.sin(please.radians(phi))]; };
+		camera.location = function() {
+			return [camera_base.location_x + r * Math.cos(please.radians(theta)) * Math.cos(please.radians(phi)),
+				camera_base.location_y + r * Math.sin(please.radians(theta)) * Math.cos(please.radians(phi)),
+				camera_base.location_z + r * Math.sin(please.radians(phi))]; };
 		if (mouse_navigation) {
 			window._move_event = [null, null];
 			window.AddEvent('mousedown', function(event) {
