@@ -3,13 +3,12 @@
 	<head>
 		<meta charset='utf-8'/>
 		<title>#NAME#</title>
-		<base href='#BASE#'/>
-		<script type='application/javascript' src='gl-matrix.js'></script>
+#BASE#		<script type='application/javascript' src='gl-matrix.js'></script>
 		<script type='application/javascript' src='mgrl.js'></script>
 		<script type='application/javascript' src='rpc.js'></script>
 		<script type='application/javascript' src='builders.js'></script>
-		<script type='application/javascript' src='webgame.js?#QUERY#'></script>
-		#SOURCE#
+		<script type='application/javascript' src='#MAIN#/webgame.js'></script>
+#SOURCE#
 		<link rel='stylesheet' href='webgame.css'/>
 	</head>
 	<body class='disconnected'>
@@ -24,7 +23,7 @@
 				<button type='button' onclick="_title_new()">Create new game</button>
 				Name:
 				<input type='text' id='title_game_name'/>
-				#RANGE#
+				<span id='numplayers'>Number of players: <input type='text' name='num_players' id='title_num_players'/><span id='range'></span></span>
 			</p>
 		</div>
 		<div id='notitle' class='hidden'>

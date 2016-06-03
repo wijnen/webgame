@@ -277,7 +277,7 @@ class Instance: # Class for game instances. {{{
 		self.game.Public.name = name
 		self.game.Public.players = []
 		# Set up players.
-		if cls is not Title:
+		if name != '':
 			if num_players is None:
 				num_players = _num_players[0]
 			if num_players < _num_players[0]:
@@ -307,7 +307,8 @@ class Instance: # Class for game instances. {{{
 		self.game.Public._die()
 		for p in self.game.players:
 			p.Private._die()
-		title_game.game.Public.games.remove(self.game.Public.name)
+		if self is not title_game:
+			title_game.game.Public.games.remove(self.game.Public.name)
 
 	def end_game(self, code):
 		#log('done')
@@ -488,66 +489,12 @@ class Connection: # {{{
 		return wrap
 # }}}
 
-def page(connection): # Response function for non websocket requests.  Falls back to websocketd.RPChttpd.page. {{{
-	if any(connection.address.path == '/' + x for x in ('rpc.js', 'builders.js')):
-		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python3-websocketd').read())
-	elif any(connection.address.path == '/' + x for x in ('webgame.js', 'gl-matrix.js', 'mgrl.js')):
-		def makeaudio(dirobj, dir):
-			ret = []
-			for f in os.listdir(dir):
-				if os.path.splitext(f)[1][len(os.path.extsep):] not in ('wav', 'ogg', 'mp3'):
-					continue
-				if os.path.isdir(f):
-					d = dirobj.copy()
-					d.append(f)
-					ret.extend(makeaudio(d, os.path.join(dir, f)))
-				else:
-					ret.append((dirobj, f, os.path.splitext(f)[0]))
-			return ret
-		audio = json.dumps(makeaudio([], fhs.read_data(os.path.join('html', 'audio'), text = False, opened = False, dir = True))).encode('utf-8')
-		if not have_2d:
-			use_3d = True
-		elif not have_3d:
-			use_3d = False
-		elif '2d' in connection.query:
-			use_3d = False
-		else:
-			use_3d = True
-		server.reply_js(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python3-webgame').read().replace(b'#3D#', b'true' if use_3d else b'false').replace(b'#LOAD#', loader_js[use_3d]).replace(b'#PREFIX#', (connection.prefix + '/').encode('utf-8')).replace(b'#AUDIO#', audio))
-	elif connection.address.path == '/webgame.css':
-		server.reply_css(connection, fhs.read_data(connection.address.path.rsplit('/', 1)[-1], text = False, packagename = 'python3-webgame').read())
-	elif connection.address.path == '/':
-		files = []
-		for d in connection.server.httpdirs:
-			for f in os.listdir(d):
-				if not f.endswith(os.extsep + 'js'):
-					continue
-				files.append(("<script type='application/javascript' src='%s'></script>" % f).encode('utf-8'))
-		files.sort()
-		if _num_players[0] == _num_players[1]:
-			range_str = "<input id='title_num_players' type='hidden' value='%d'/>" % _num_players[0]
-		else:
-			if _num_players[1] is None:
-				player_range = '%d or more' % _num_players[0]
-			else:
-				player_range = 'from %d to %d' % (_num_players[0], _num_players[1])
-			range_str = "Number of players: <input type='text' id='title_num_players'/> (%s)</span>" % player_range
-		server.reply_html(connection, fhs.read_data('webgame.html', text = False, packagename = 'python3-webgame').read().replace(b'#NAME#', __main__.name.encode('utf-8')).replace(b'#BASE#', (connection.prefix + '/').encode('utf-8')).replace(b'#SOURCE#', b'\n\t\t'.join(files)).replace(b'#QUERY#', connection.address.query.encode('utf-8')).replace(b'#RANGE#', range_str.encode('utf-8')))
-	else:
-		if 'name' in connection.query:
-			connection.data['name'] = connection.query['name'][-1]
-		path = connection.address.path.split('/')
-		if path[-1].startswith('2d-') or path[-1].startswith('3d-'):
-			path = path[:-2] + [path[-1][:2], path[-2], path[-1][3:]]
-		websocketd.RPChttpd.page(server, connection, '/'.join(path))
-# }}}
-
 class Title: # Class for default title game object. {{{
-	def __init__(self):
-		self.num_players = 0
 	def run(self):
 		self.Public.title = __main__.name
 		self.Public.games = []
+		self.Public.min_players = _num_players[0]
+		self.Public.max_players = _num_players[1]
 		while True:
 			cmd = (yield ('new', 'join', 'return', 'view'))
 			connection = cmd['connection']
@@ -627,7 +574,7 @@ def leave(args): # Player leaves the game.  This is always available except from
 		end.close()
 # }}}
 
-def Game(cmd = {}, title = Title): # Main function to start a game.  Pass commands that always work, if any. {{{
+def Game(): # Main function to start a game. {{{
 	global server, title_game, have_2d, have_3d, _num_players
 	# Set up the game name.
 	if not hasattr(__main__, 'name') or __main__.name is None:
@@ -661,13 +608,13 @@ def Game(cmd = {}, title = Title): # Main function to start a game.  Pass comman
 			loader_js[use_3d] = b'\twindow.dispatchEvent(new CustomEvent("mgrl_media_ready"));'
 	# Set up commands.
 	cmds['leave'] = {None: leave}
-	for c in cmd:
-		cmds[c] = {None: cmd[c]}
+	if hasattr(__main__, 'commands'):
+		for c in __main__.commands:
+			cmds[c] = {None: __main__.commands[c]}
 	# Start up websockets server.
 	config = fhs.module_get_config('webgame')
 	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html', os.path.join('html', '2d'), os.path.join('html', '3d'))]
 	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = httpdirs[0] + httpdirs[1] + httpdirs[2])
-	server.page = page
 	server.handle_ext('png', 'image/png')
 	server.handle_ext('jpg', 'image/jpeg')
 	server.handle_ext('jpeg', 'image/jpeg')
@@ -682,7 +629,10 @@ def Game(cmd = {}, title = Title): # Main function to start a game.  Pass comman
 	server.handle_ext('vert', 'text/plain')
 	server.handle_ext('glsl', 'text/plain')
 	# Set up title page.
-	title_game = Instance(title, '')
+	if hasattr(__main__, 'Title'):
+		title_game = Instance(__main__.Title, '')
+	else:
+		title_game = Instance(Title, '')
 	log('Game "%s" started' % __main__.name)
 	# Main loop.
 	websocketd.fgloop()

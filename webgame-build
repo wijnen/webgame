@@ -1,0 +1,159 @@
+#!/usr/bin/python3
+
+'''
+Compiler for webgames.  This program does the following:
+
+- Create a directory that contains all files required for running the game.
+- Inject code into html and js files to load all assets.
+- Add header and footer to main file so it is an executable.
+
+The result is placed in the location for webgames, $(XDG_DATA_HOME)/webgame by
+default.  Under there, the game is placed named $GAMENAME, the assets are
+placed in html/$GAMENAME/, and extra python files are placed under
+modules/$GAMENAME/.  The generated header in the executable adds that path to
+the module search path if it is created.
+
+game
+modules/game/support.py
+html/mgrl.js
+html/gl-matrix.js
+html/builders.js
+html/rpc.js
+html/webgame.js
+html/webgame.css
+html/game/main.js
+html/game/index.html
+html/game/img/texture.png
+html/game/jta/object.jta
+'''
+
+import fhs
+import sys
+import os
+import shutil
+import json
+
+config = fhs.init({'src': '.', 'dest': '', 'link': True, 'name': '', 'base': ''}, game = True, packagename = 'python3-webgame')
+
+dest = config['dest'] or fhs.write_data('webgame', dir = True, opened = False)
+main = [x for x in os.listdir(config['src']) if not x.endswith(os.extsep + 'py') and not os.path.isdir(os.path.join(config['src'], x))]
+if len(main) != 1:
+	sys.stderr.write('only one main file allowed; found ' + ', '.join(main) + '\n')
+	sys.exit(1)
+main = main[0]
+name = config['name'] or main.capitalize()
+webbase = "\t\t<base href='{}'/>".format(config['base']) if config['base'] else ''
+modules = [x for x in os.listdir(config['src']) if x.endswith(os.extsep + 'py') and not os.path.isdir(os.path.join(config['src'], x))]
+jssrc = os.path.join(config['src'], 'html')
+js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
+js.sort()
+assets = [x for x in os.listdir(jssrc) if os.path.isdir(os.path.join(jssrc, x))]
+assets.sort()
+
+if os.path.exists(dest):
+	shutil.rmtree(dest)
+os.makedirs(os.path.join(dest, 'html', main))
+
+def copy(src, dst):
+	src = os.path.abspath(src)
+	dst = os.path.abspath(dst)
+	base = os.path.dirname(dst)
+	if not os.path.isdir(base):
+		os.makedirs(base)
+	if config['link']:
+		os.symlink(src, dst, os.path.isdir(src))
+	else:
+		shutil.copytree(src, dst)
+
+# Write or link python modules.
+if len(modules) > 0:
+	os.makedirs(os.path.join(dest, 'modules', main))
+	for m in modules:
+		copy(os.path.join(config['src'], m), os.path.join(dest, 'modules', main, m))
+
+# Write javascript files.
+for j in js:
+	copy(os.path.join(jssrc, j), os.path.join(dest, 'html', main, j))
+
+# Write or link assets.
+for a in assets:
+	copy(os.path.join(jssrc, a), os.path.join(dest, 'html', main, a))
+
+# Write or link default files.
+with open(os.path.join(dest, 'html', 'index' + os.extsep + 'html'), 'w') as f:
+	files = ["\t\t<script type='application/javascript' src='{}/{}'></script>".format(main, f) for f in js]
+	#print('name: {}\nbase: {}\nsource: {}'.format(name, webbase, files))
+	f.write(fhs.read_data('webgame' + os.extsep + 'html').read().replace('#NAME#', name).replace('#MAIN#', main).replace('#BASE#', webbase).replace('#SOURCE#', '\n'.join(files)))
+
+def makeaudio(dirobj, dir):
+	if not os.path.isdir(dir):
+		return []
+	ret = []
+	for f in os.listdir(dir):
+		if os.path.splitext(f)[1][len(os.path.extsep):] not in ('wav', 'ogg', 'mp3'):
+			continue
+		if os.path.isdir(f):
+			d = dirobj.copy()
+			d.append(f)
+			ret.extend(makeaudio(d, os.path.join(dir, f)))
+		else:
+			ret.append((dirobj, f, os.path.splitext(f)[0]))
+	return ret
+audio = json.dumps(makeaudio([], os.path.join(config['src'], 'html', 'audio')))
+
+loader_js = [None, None]
+for subdir, use_3d in (('2d', False), ('3d', True)):
+	targets = []
+	for base in ('img', 'jta', 'gani', 'audio', 'text'):
+		for d in (os.path.join('html', base), os.path.join('html', subdir, base)):
+			for p in fhs.read_data(d, dir = True, multiple = True, opened = False):
+				targets.extend(f for f in os.listdir(p) if not f.startswith('.') and not os.path.isdir(os.path.join(p, f)))
+	if len(targets) > 0:
+		loader_js[use_3d] = '\n'.join("\tplease.load('{}');".format(f) for f in targets)
+	else:
+		# Nothing to load, but force the "finished loading" event to fire anyway.
+		loader_js[use_3d] = '\twindow.dispatchEvent(new CustomEvent("mgrl_media_ready"));'
+
+can_2d = os.path.isdir(os.path.join(config['src'], 'html', '2d'))
+can_3d = not can_2d or os.path.isdir(os.path.join(config['src'], 'html', '3d'))
+if can_2d and can_3d:
+	use3d = '''\
+	use_3d = true;
+	if (document.location.search[0] == '?') {
+		var s = document.location.search.substring(1).split('&');
+		for (var i = i; i < s.length; ++i) {
+			var kv = s[i].split('=', 1);
+			if (kv[0] == '2d' && kv[1] != '0') {
+				use_3d = false;
+				break;
+			}
+		}
+	}'''
+elif can_2d:
+	use3d = '\tuse_3d = false;'
+else:
+	use3d = '\tuse_3d = true;'
+
+if can_3d:
+	with open(os.path.join(dest, 'html', main, 'webgame' + os.extsep + 'js'), 'w') as f:
+		f.write(fhs.read_data('webgame' + os.extsep + 'js').read().replace('#LOAD#', loader_js[True]).replace('#AUDIO#', audio).replace('#USE3D#', use3d).replace('#MAIN#', main))
+if can_2d:
+	with open(os.path.join(dest, 'html', main, 'webgame-2d' + os.extsep + 'js'), 'w') as f:
+		f.write(fhs.read_data('webgame' + os.extsep + 'js').read().replace('#LOAD#', loader_js[False]).replace('#AUDIO#', audio).replace('#USE3D#', use3d).replace('#MAIN#', main))
+with open(os.path.join(dest, 'html', 'rpc' + os.extsep + 'js'), 'w') as f:
+	f.write(fhs.read_data('rpc' + os.extsep + 'js').read().replace('#WEBSOCKET#', "(window.hasOwnProperty('MozWebSocket') ? new MozWebSocket('ws://' + document.location.host + '/{}/websocket/') : new WebSocket('ws://' + document.location.host + '/{}/websocket/'))".format(main, main)))
+copy(fhs.read_data('webgame' + os.extsep + 'css', opened = False), os.path.join(dest, 'html', 'webgame' + os.extsep + 'css'))
+copy(fhs.read_data('gl-matrix' + os.extsep + 'js', opened = False), os.path.join(dest, 'html', 'gl-matrix' + os.extsep + 'js'))
+copy(fhs.read_data('mgrl' + os.extsep + 'js', opened = False), os.path.join(dest, 'html', 'mgrl' + os.extsep + 'js'))
+copy(fhs.read_data('builders' + os.extsep + 'js', opened = False), os.path.join(dest, 'html', 'builders' + os.extsep + 'js'))
+
+# Write main file.
+with open(os.path.join(dest, main), 'w') as f:
+	f.write('#!/usr/bin/python3\n')
+	f.write('import webgame\n')
+	if len(modules) > 0:
+		f.write('import sys\n')
+		f.write("sys.path = ['{}'] + sys.path\n".format(os.path.join('modules', main)))
+	f.write(open(os.path.join(config['src'], main)).read())
+	f.write('\nwebgame.Game()\n')
+os.chmod(os.path.join(dest, main), 0o755)

@@ -6,7 +6,7 @@ var _title_screen;
 var title_gamelist = [];
 var server;
 var _audio, audio;
-var use_3d = #3D#;
+var use_3d;
 var mouse_navigation = true;
 var my_name = null;
 var _players = [], _playerdiv;
@@ -26,17 +26,17 @@ AddEvent('load', function () { // {{{
 	_canvas = document.getElementById('canvas');
 	Public = { state: '', name: '' };
 	Private = { state: '' };
-	var root = '#PREFIX#';
+#USE3D#
 	if (use_3d)
 		please.gl.set_context('canvas');
 	else
 		please.dom.set_context('canvas');
-	please.set_search_path('img', root + 'img');
-	please.set_search_path('jta', root + 'jta');
-	please.set_search_path('gani', root + 'gani');
-	please.set_search_path('audio', root + 'audio');
-	please.set_search_path('glsl', root + 'glsl');
-	please.set_search_path('text', root + 'text');
+	please.set_search_path('img', '#MAIN#/img');
+	please.set_search_path('jta', '#MAIN#/jta');
+	please.set_search_path('gani', '#MAIN#/gani');
+	please.set_search_path('audio', '#MAIN#/audio');
+	please.set_search_path('glsl', '#MAIN#/glsl');
+	please.set_search_path('text', '#MAIN#/text');
 #LOAD#
 }); // }}}
 
@@ -208,6 +208,18 @@ function _Public_update(path, value) { // {{{
 	if (Public.name == '') {
 		_title_screen = true;
 		document.title = _gametitle;
+		// Set number of players for new games.
+		if (Public.min_players == Public.max_players) {
+			document.getElementById('numplayers').AddClass('hidden');
+			document.getElementById('title_num_players').value = Public.max_players;
+		}
+		else {
+			document.getElementById('numplayers').RemoveClass('hidden');
+			if (Public.max_players === null)
+				document.getElementById('range').ClearAll().AddText('(' + Public.max_players + ' or more)');
+			else
+				document.getElementById('range').ClearAll().AddText('(' + Public.min_players + ' - ' + Public.max_players + ')');
+		}
 		// Show title screen.
 		_title_title.ClearAll().AddText(Public.title);
 		var games = Public.games || [];
