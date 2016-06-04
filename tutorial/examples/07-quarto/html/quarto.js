@@ -58,7 +58,7 @@ function click(piece) { // {{{
 	// Check if we are picking and the tile is not placed yet.
 	if (!Private.pick || Public.pieces[piece] === null)
 		return;
-	server.call('pick', [piece]);
+	server.pick(piece);
 } // }}}
 
 function click_board(x, y) { // {{{
@@ -67,7 +67,7 @@ function click_board(x, y) { // {{{
 	y = Math.trunc(y + 2);
 	if (!Private.place || Public.board[y][x] !== null)
 		return;
-	server.call('place', [x, y]);
+	server.place(x, y);
 } // }}}
 
 // If this function exists, it is called whenever the canvas changes size.  It

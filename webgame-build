@@ -36,11 +36,11 @@ import json
 config = fhs.init({'src': '.', 'dest': '', 'link': True, 'name': '', 'base': ''}, game = True, packagename = 'python3-webgame')
 
 dest = config['dest'] or fhs.write_data('webgame', dir = True, opened = False)
-main = [x for x in os.listdir(config['src']) if not x.endswith(os.extsep + 'py') and not os.path.isdir(os.path.join(config['src'], x))]
+main = [x for x in os.listdir(config['src']) if os.path.splitext(x)[1] == os.extsep + 'gpy' and not os.path.isdir(os.path.join(config['src'], x))]
 if len(main) != 1:
 	sys.stderr.write('only one main file allowed; found ' + ', '.join(main) + '\n')
 	sys.exit(1)
-main = main[0]
+main = os.path.splitext(main[0])[0]
 name = config['name'] or main.capitalize()
 webbase = "\t\t<base href='{}'/>".format(config['base']) if config['base'] else ''
 modules = [x for x in os.listdir(config['src']) if x.endswith(os.extsep + 'py') and not os.path.isdir(os.path.join(config['src'], x))]
@@ -50,8 +50,8 @@ js.sort()
 assets = [x for x in os.listdir(jssrc) if os.path.isdir(os.path.join(jssrc, x))]
 assets.sort()
 
-if os.path.exists(dest):
-	shutil.rmtree(dest)
+if os.path.exists(os.path.join(dest, 'html', main)):
+	shutil.rmtree(os.path.join(dest, 'html', main))
 os.makedirs(os.path.join(dest, 'html', main))
 
 def copy(src, dst):
@@ -80,7 +80,7 @@ for a in assets:
 	copy(os.path.join(jssrc, a), os.path.join(dest, 'html', main, a))
 
 # Write or link default files.
-with open(os.path.join(dest, 'html', 'index' + os.extsep + 'html'), 'w') as f:
+with open(os.path.join(dest, 'html', main + os.extsep + 'html'), 'w') as f:
 	files = ["\t\t<script type='application/javascript' src='{}/{}'></script>".format(main, f) for f in js]
 	#print('name: {}\nbase: {}\nsource: {}'.format(name, webbase, files))
 	f.write(fhs.read_data('webgame' + os.extsep + 'html').read().replace('#NAME#', name).replace('#MAIN#', main).replace('#BASE#', webbase).replace('#SOURCE#', '\n'.join(files)))
@@ -154,6 +154,6 @@ with open(os.path.join(dest, main), 'w') as f:
 	if len(modules) > 0:
 		f.write('import sys\n')
 		f.write("sys.path = ['{}'] + sys.path\n".format(os.path.join('modules', main)))
-	f.write(open(os.path.join(config['src'], main)).read())
+	f.write(open(os.path.join(config['src'], main + os.extsep + 'gpy')).read())
 	f.write('\nwebgame.Game()\n')
 os.chmod(os.path.join(dest, main), 0o755)

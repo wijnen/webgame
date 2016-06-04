@@ -60,7 +60,7 @@ function next() {
 		if (item.length == 1) {
 			// If there is only one option, it must be chosen.
 			// Call the choose command in the server, with this option.
-			server.call('choose', [item[0]]);
+			server.choose(item[0]);
 		}
 		else {
 			text_tag.ClearAll().AddText(item[0]);
@@ -71,7 +71,7 @@ function next() {
 				button.scene = item[i][1];
 				button.AddEvent('click', function() {
 					// Call the choose command in the server, with the selected option.
-					server.call('choose', [this.scene]);
+					server.choose(this.scene);
 				});
 			}
 		}

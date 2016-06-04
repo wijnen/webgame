@@ -4,7 +4,7 @@ var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _m
 var _gametitle;
 var _title_screen;
 var title_gamelist = [];
-var server;
+var serverobj, server;
 var _audio, audio;
 var use_3d;
 var mouse_navigation = true;
@@ -171,9 +171,10 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 			window[name].apply(window, args);
 		}
 	};
-	server = Rpc(messages,
+	serverobj = Rpc(messages,
 		function() { _body.RemoveClass('disconnected'); },
 		function() { _body.AddClass('disconnected'); });
+	server = serverobj.proxy;
 	please.set_viewport(renderer);
 	window.AddEvent('resize', _resize_window);
 	if (!use_3d && window.init_2d !== undefined) window.init_2d();
@@ -299,16 +300,16 @@ function title_make_option(select, name, n) { // {{{
 
 function _title_join() { // {{{
 	var game = title_select.options[title_select.selectedIndex].value;
-	server.call('join', [game]);
+	server.join(game);
 } // }}}
 
 function _title_view() { // {{{
 	var game = title_select.options[title_select.selectedIndex].value;
-	server.call('view', [game]);
+	server.view(game);
 } // }}}
 
 function _title_new() { // {{{
-	server.call('new', [document.getElementById('title_game_name').value, Number(document.getElementById('title_num_players').value)]);
+	server['new'](document.getElementById('title_game_name').value, Number(document.getElementById('title_num_players').value));
 } // }}}
 
 function _Private_update(path, value) { // {{{
@@ -341,7 +342,7 @@ function _Private_update(path, value) { // {{{
 } // }}}
 
 function _leave() { // {{{
-	server.call('leave');
+	server.leave();
 } // }}}
 
 function _makestate() { // {{{

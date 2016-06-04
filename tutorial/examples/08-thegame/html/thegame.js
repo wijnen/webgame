@@ -16,7 +16,7 @@ function init() {
 	end.on_click = function() {
 		if (!can_end())
 			return;
-		server.call('play', [null, null]);
+		server.play(null, null);
 	};
 	end.selectable = true;
 	end.location = [0, -1, 0];
@@ -119,15 +119,13 @@ function unselectable_hand(i) {
 }
 
 function click_pile(i) {
-	console.info('click pile');
 	if (selected === null || Public.players[Public.turn].name != my_name)
 		return;
-	server.call('play', [Private.hand[selected][0], i]);
+	server.play(Private.hand[selected][0], i);
 	selected = null;
 }
 
 function click_hand(i) {
-	console.info('click hand');
 	if (selected == i)
 		selected = null;
 	else

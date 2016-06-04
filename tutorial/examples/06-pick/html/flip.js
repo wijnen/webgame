@@ -9,7 +9,7 @@ function make_tile(x, y) {
 	// Set selectable to true to make it respond to pointer click events.
 	tile.selectable = true;
 	// The on_click function is called when the object is clicked.
-	tile.on_click = function() { server.call('flip', [x, y]); };
+	tile.on_click = function() { server.flip(x, y); };
 }
 
 function init() {

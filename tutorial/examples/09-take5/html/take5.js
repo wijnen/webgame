@@ -68,11 +68,11 @@ function set_hand(i, c) {
 function click_board(row) {
 	if (!Private.taking)
 		return;
-	server.call('take', [row]);
+	server.take(row);
 }
 
 function click_hand(i) {
 	if (!Private.choosing)
 		return;
-	server.call('choose', [Private.hand[i]]);
+	server.choose(Private.hand[i]);
 }
