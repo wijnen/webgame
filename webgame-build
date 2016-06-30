@@ -32,8 +32,9 @@ import sys
 import os
 import shutil
 import json
+import subprocess
 
-config = fhs.init({'src': '.', 'dest': '', 'link': True, 'name': '', 'base': ''}, game = True, packagename = 'python3-webgame')
+config = fhs.init({'src': '.', 'dest': '', 'link': True, 'name': '', 'base': '', 'run': True}, game = True, packagename = 'python3-webgame')
 
 dest = config['dest'] or fhs.write_data('webgame', dir = True, opened = False)
 main = [x for x in os.listdir(config['src']) if os.path.splitext(x)[1] == os.extsep + 'gpy' and not os.path.isdir(os.path.join(config['src'], x))]
@@ -61,8 +62,12 @@ def copy(src, dst):
 	if not os.path.isdir(base):
 		os.makedirs(base)
 	if config['link']:
+		if os.path.exists(dst):
+			os.unlink(dst)
 		os.symlink(src, dst, os.path.isdir(src))
 	else:
+		if os.path.exists(dst):
+			shutil.deltree(dst)
 		shutil.copytree(src, dst)
 
 # Write or link python modules.
@@ -83,7 +88,7 @@ for a in assets:
 with open(os.path.join(dest, 'html', main + os.extsep + 'html'), 'w') as f:
 	files = ["\t\t<script type='application/javascript' src='{}/{}'></script>".format(main, f) for f in js]
 	#print('name: {}\nbase: {}\nsource: {}'.format(name, webbase, files))
-	f.write(fhs.read_data('webgame' + os.extsep + 'html').read().replace('#NAME#', name).replace('#MAIN#', main).replace('#BASE#', webbase).replace('#SOURCE#', '\n'.join(files)))
+	f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'html')).read().replace('#NAME#', name).replace('#MAIN#', main).replace('#BASE#', webbase).replace('#SOURCE#', '\n'.join(files)))
 
 def makeaudio(dirobj, dir):
 	if not os.path.isdir(dir):
@@ -136,16 +141,16 @@ else:
 
 if can_3d:
 	with open(os.path.join(dest, 'html', main, 'webgame' + os.extsep + 'js'), 'w') as f:
-		f.write(fhs.read_data('webgame' + os.extsep + 'js').read().replace('#LOAD#', loader_js[True]).replace('#AUDIO#', audio).replace('#USE3D#', use3d).replace('#MAIN#', main))
+		f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'js')).read().replace('#LOAD#', loader_js[True]).replace('#AUDIO#', audio).replace('#USE3D#', use3d).replace('#MAIN#', main))
 if can_2d:
 	with open(os.path.join(dest, 'html', main, 'webgame-2d' + os.extsep + 'js'), 'w') as f:
-		f.write(fhs.read_data('webgame' + os.extsep + 'js').read().replace('#LOAD#', loader_js[False]).replace('#AUDIO#', audio).replace('#USE3D#', use3d).replace('#MAIN#', main))
+		f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'js')).read().replace('#LOAD#', loader_js[False]).replace('#AUDIO#', audio).replace('#USE3D#', use3d).replace('#MAIN#', main))
 with open(os.path.join(dest, 'html', 'rpc' + os.extsep + 'js'), 'w') as f:
-	f.write(fhs.read_data('rpc' + os.extsep + 'js').read().replace('#WEBSOCKET#', "(window.hasOwnProperty('MozWebSocket') ? new MozWebSocket('ws://' + document.location.host + '/{}/websocket/') : new WebSocket('ws://' + document.location.host + '/{}/websocket/'))".format(main, main)))
-copy(fhs.read_data('webgame' + os.extsep + 'css', opened = False), os.path.join(dest, 'html', 'webgame' + os.extsep + 'css'))
-copy(fhs.read_data('gl-matrix' + os.extsep + 'js', opened = False), os.path.join(dest, 'html', 'gl-matrix' + os.extsep + 'js'))
-copy(fhs.read_data('mgrl' + os.extsep + 'js', opened = False), os.path.join(dest, 'html', 'mgrl' + os.extsep + 'js'))
-copy(fhs.read_data('builders' + os.extsep + 'js', opened = False), os.path.join(dest, 'html', 'builders' + os.extsep + 'js'))
+	f.write(fhs.read_data('rpc' + os.extsep + 'js', packagename = 'python3-websocketd').read().replace('#WEBSOCKET#', "(window.hasOwnProperty('MozWebSocket') ? new MozWebSocket('ws://' + document.location.host + '/{}/websocket/') : new WebSocket('ws://' + document.location.host + '/{}/websocket/'))".format(main, main)))
+copy(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'css'), opened = False), os.path.join(dest, 'html', 'webgame' + os.extsep + 'css'))
+copy(fhs.read_data(os.path.join('html', 'gl-matrix' + os.extsep + 'js'), opened = False), os.path.join(dest, 'html', 'gl-matrix' + os.extsep + 'js'))
+copy(fhs.read_data(os.path.join('html', 'mgrl' + os.extsep + 'js'), opened = False), os.path.join(dest, 'html', 'mgrl' + os.extsep + 'js'))
+copy(fhs.read_data('builders' + os.extsep + 'js', opened = False, packagename = 'python3-websocketd'), os.path.join(dest, 'html', 'builders' + os.extsep + 'js'))
 
 # Write main file.
 with open(os.path.join(dest, main), 'w') as f:
@@ -157,3 +162,7 @@ with open(os.path.join(dest, main), 'w') as f:
 	f.write(open(os.path.join(config['src'], main + os.extsep + 'gpy')).read())
 	f.write('\nwebgame.Game()\n')
 os.chmod(os.path.join(dest, main), 0o755)
+
+# Run.
+if config['run']:
+	subprocess.run((os.path.join(dest, main)))
