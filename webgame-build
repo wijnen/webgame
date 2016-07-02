@@ -6,12 +6,17 @@ Compiler for webgames.  This program does the following:
 - Create a directory that contains all files required for running the game.
 - Inject code into html and js files to load all assets.
 - Add header and footer to main file so it is an executable.
+- Run the newly built server.
 
 The result is placed in the location for webgames, $(XDG_DATA_HOME)/webgame by
 default.  Under there, the game is placed named $GAMENAME, the assets are
 placed in html/$GAMENAME/, and extra python files are placed under
 modules/$GAMENAME/.  The generated header in the executable adds that path to
 the module search path if it is created.
+
+If modules that are used by the builder are included from the main source
+directory, they are copied into the build directory.  network, websocketd and
+webgame are imported so this method can be used for them.
 
 game
 modules/game/support.py
@@ -28,6 +33,9 @@ html/game/jta/object.jta
 '''
 
 import fhs
+import network
+import websocketd
+import webgame
 import sys
 import os
 import shutil
@@ -56,6 +64,7 @@ if os.path.exists(os.path.join(dest, 'html', main)):
 os.makedirs(os.path.join(dest, 'html', main))
 
 def copy(src, dst):
+	assert src and os.path.exists(src)
 	src = os.path.abspath(src)
 	dst = os.path.abspath(dst)
 	base = os.path.dirname(dst)
@@ -155,14 +164,31 @@ copy(fhs.read_data('builders' + os.extsep + 'js', opened = False, packagename = 
 # Write main file.
 with open(os.path.join(dest, main), 'w') as f:
 	f.write('#!/usr/bin/python3\n')
-	f.write('import webgame\n')
+	f.write('import sys\n')
+	f.write("sys.path = ['{}'] + sys.path\n".format(os.path.join(dest, 'modules')))
 	if len(modules) > 0:
-		f.write('import sys\n')
-		f.write("sys.path = ['{}'] + sys.path\n".format(os.path.join('modules', main)))
+		f.write("sys.path = ['{}'] + sys.path\n".format(os.path.join(dest, 'modules', main)))
+	f.write('import webgame\n')
 	f.write(open(os.path.join(config['src'], main + os.extsep + 'gpy')).read())
 	f.write('\nwebgame.Game()\n')
 os.chmod(os.path.join(dest, main), 0o755)
 
+# Copy bundled modules.
+mydir = os.path.realpath(os.path.dirname(sys.argv[0]))
+for m in sys.modules:
+	if m == '__main__':
+		continue
+	if not hasattr(sys.modules[m], '__file__'):
+		#print('no file: {}'.format(m))
+		continue
+	if os.path.realpath(os.path.dirname(sys.modules[m].__file__)) != mydir:
+		#print('wrong dir: {} {}'.format(mydir, sys.modules[m].__file__))
+		continue
+	target = os.path.join(dest, 'modules')
+	if not os.path.exists(target):
+		os.mkdir(target)
+	shutil.copy2(sys.modules[m].__file__, os.path.join(target, os.path.basename(sys.modules[m].__file__)))
+
 # Run.
 if config['run']:
-	subprocess.run((os.path.join(dest, main)))
+	subprocess.Popen([os.path.join(dest, main)], close_fds = True).communicate()

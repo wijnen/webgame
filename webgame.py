@@ -331,7 +331,7 @@ class Instance: # Class for game instances. {{{
 		#log('cmd = %s' % repr(cmd))
 		if end_task[0] or cmd is None:
 			for t in task.waiters:
-				websocketd.idle_add(lambda: self.run(t, end_task[1]))
+				websocketd.add_idle(lambda: self.run(t, end_task[1]))
 			self.tasks.remove(task)
 			if len(self.tasks) == 0:
 				self.end_game(end_task[1])
@@ -351,7 +351,7 @@ class Instance: # Class for game instances. {{{
 		# Check if we're waiting for a task that is already finished.
 		for c in cmd:
 			if isinstance(c, Task) and c.done:
-				websocketd.idle_add(lambda: self.run(task, c.value))
+				websocketd.add_idle(lambda: self.run(task, c.value))
 				return
 		# Schedule new timeout.
 		if None in cmd:
