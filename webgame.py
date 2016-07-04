@@ -76,6 +76,8 @@ class Shared_Object(collections.MutableMapping): # {{{
 			else:
 				ret[k] = v
 		return ret
+	def __str__(self):
+		return '<shared ' + str(dict(self)) + ' >'
 # }}}
 
 class Shared_Array(collections.MutableSequence): # {{{
@@ -152,6 +154,8 @@ class Shared_Array(collections.MutableSequence): # {{{
 			else:
 				ret.append(v)
 		return ret
+	def __str__(self):
+		return '<shared ' + str(list(self)) + ' >'
 # }}}
 
 def make_shared(parent_path, target, key, value, send, group): # {{{
@@ -465,8 +469,9 @@ class Connection: # {{{
 			queue = self.instance.cmds[attr]
 			instance = self.instance
 		else:
-			log('attribute not found: %s not in %s %s' % (attr, repr(cmds), repr(self.instance.cmds)))
-			raise AttributeError('attribute %s not found' % attr)
+			# This may happen due to the asynchronous communication, so it should not produce an error for the user.
+			log('attribute not found: %s not in %s %s (ignored)' % (attr, repr(cmds), repr(self.instance.cmds)))
+			return
 		def wrap(*a, **ka):
 			action = False
 			for task in queue.copy():
@@ -479,13 +484,17 @@ class Connection: # {{{
 					func = None
 				action = True
 				args = {'args': Args(a, ka), 'connection': self, 'player': self.num, 'command': attr}
-				if func is not None:
-					websocketd.add_idle(lambda: func(args) and False)
-				if task is not None:
-					instance.cleanup(task);
-					websocketd.add_idle(lambda: instance.run(task, args))
+				# Use a function to ensure every loop iteration has its own copy of the variables.
+				def call(instance, func, args, task):
+					if func is not None:
+						websocketd.add_idle(lambda: func(args) and False)
+					if task is not None:
+						instance.cleanup(task);
+						websocketd.add_idle(lambda: instance.run(task, args))
+				call(instance, func, args, task)
 			if not action:
-				raise AttributeError('forbidden')
+				# This may happen due to the asynchronous communication, so it should not produce an error for the user.
+				log('ignoring invalid command {}'.format(attr))
 		return wrap
 # }}}
 

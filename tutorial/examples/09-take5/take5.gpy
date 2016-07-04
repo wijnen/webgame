@@ -1,3 +1,4 @@
+# vim: set filetype=python :
 # Public.scores = [int] for every player; lower is better.
 # Public.board = [[int], [int], [int], [int]] cards on the table.
 # Private.hand = [int] cards in hand.
@@ -30,7 +31,7 @@ class Game:
 		self.players[p].Private.taking = True;
 		self.players[p].Private.state = 'Select a row to take';
 		while True:
-			row = yield {'take': p}['args'][0]
+			row = (yield {'take': p})['args'][0]
 			if 0 <= row < 4:
 				self.players[p].Private.taking = False;
 				self.players[p].Private.state = '';
@@ -72,13 +73,13 @@ class Game:
 			playerlist = list(range(len(self.players)))
 			playerlist.sort(key = lambda x: self.players[x].choice)
 			for p in playerlist:
-				options = [c for c in range(len(self.Public.board)) if deck[c][-1] < self.players[p].choice]
+				options = [c for c in range(len(self.Public.board)) if self.Public.board[c][-1] < self.players[p].choice]
 				if len(options) == 0:
 					# Choose a row to take.
 					row = yield from self.choose_row(p)
 					self.take(p, row)
 				else:
-					row = min(options, key = lambda x: deck[x][-1])
+					row = max(options, key = lambda x: self.Public.board[x][-1])
 				if len(self.Public.board[row]) >= 5:
 					self.take(p, row)
 				self.Public.board[row].append(self.players[p].choice)
@@ -86,13 +87,13 @@ class Game:
 	def take(self, player, row):
 		# Add player score.
 		for c in self.Public.board[row]:
-			if f == 55:
+			if c == 55:
 				self.Public.scores[player] += 7
-			elif f % 11 == 0:
+			elif c % 11 == 0:
 				self.Public.scores[player] += 5
-			elif f % 10 == 0:
+			elif c % 10 == 0:
 				self.Public.scores[player] += 3
-			elif f % 10 == 5:
+			elif c % 10 == 5:
 				self.Public.scores[player] += 2
 			else:
 				self.Public.scores[player] += 1
