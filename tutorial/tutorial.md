@@ -1,11 +1,11 @@
 Requirements:
-m.grl
-python-fhs
-python-network
-python-websocketd
-python-webgame
-blender
-bitmap image editor (possibly Blender, more likely Gimp or similar)
+[M.GRL](https://github.com/aeva/m.grl)
+[python-fhs](https://github.com/wijnen/python-fhs)
+[python-network](https://github.com/wijnen/python-network)
+[python-websocketd](https://github.com/wijnen/python-websocketd)
+[python-webgame](https://github.com/wijnen/python-webgame)
+[Blender](http://blender.org)
+bitmap image editor (possibly Blender, more likely [Gimp](http://www.gimp.org) or similar)
 text editor, such as gedit.
 	Stay away from Microsoft editors; they put a BOM at the start of UTF-8
 	encoded text files, which breaks everything.
@@ -15,6 +15,18 @@ Prerequisites:
 - Basic knowledge of Javascript
 - Model editing, rigging, and action editing in Blender
 - Bitmap image editing
+
+# Installation
+If pythhon-{fhs,network,websocketd} are not installed on the system, copy the
+module files ({fhs,network,websocketd}.py) into the python-webgame directory.
+
+Copy or link mgrl.js and demos/gl-matrix.js from the m.grl source into the html
+directory of the python-webgame source.
+
+In the m.grl source, go to apps/blender\_addon and create a zip of the code in
+there using ``zip io_scene_jta.zip io_scene_jta/*`` .  Open Blender, go through
+user settings to addons and use the install from file button to install the
+newly created zip file.
 
 # Introduction
 This tutorial teaches how to use Python-webgame through examples and
@@ -34,21 +46,21 @@ set the main file to be executable and run it from the commandline.  Then point
 a browser to http://localhost:8891 to see the title screen.  When you create a
 game there, it will show you an empty screen that allows you to leave.
 
-* Read: non-game
-* Exercise: Make it run.  Don't copy and paste; type everything.
+* Read: non-game.gpy
+* Exercise: Make it run.
 
 ## Example 1: Simple working scene
 This program displays some objects.  The objects have been designed in Blender.
 The example uses the default monkey head with a texture that is all the same
 color, which makes it hard to see that it is a monkey head.
 
-* Read: static, html/static.js, html/monkey.blend
+* Read: static.gpy, html/static.js, html/monkey.blend
 * Exercise: Design a different object and place three of them in a triangle.
 
 ## Example 2: Stop motion scene
 This demonstrates communication from the server to the clients.
 
-* Read: stop-motion, html/stop-motion.js
+* Read: stop-motion.gpy, html/stop-motion.js
 * Exercise: Create a scene with two actors and control them with the server.
 
 ## Example 3: Scripted animations
@@ -69,7 +81,7 @@ as well.  This example shows how to use them.
 This example shows how the server can allow clients to send commands, and how
 clients use it.
 
-* Read: novel, html/novel.js
+* Read: novel.gpy, html/novel.js
 * Exercise: Add animations.
 
 ## Example 6: Flipping tiles
@@ -83,7 +95,7 @@ This example shows how to yield a dict to allow control over what commands are
 allowed.  Note that this game documents everything (including things that were
 documented before), because it was written as a standalone example.
 
-* Read: quarto, html/quarto.js
+* Read: quarto.gpy, html/quarto.js
 * Excercise: Create tic tac toe
 
 ## Example 8: Generated textures
@@ -98,8 +110,10 @@ This example shows how Tasks can be used to simplify the implementation of a
 game where things happen in parallel, such as all players preparing their turn
 simultaneously.
 
-* Read: take5
+* Read: take5.gpy
 * Exercise: Scissors, Paper, Rock.
+
+The following is a plan for the rest of this tutorial; this part has not been made yet.
 
 - 2-D interface.
         + Quarto 2-D
