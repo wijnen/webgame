@@ -1,16 +1,16 @@
-Requirements:
-[M.GRL](https://github.com/aeva/m.grl)
-[python-fhs](https://github.com/wijnen/python-fhs)
-[python-network](https://github.com/wijnen/python-network)
-[python-websocketd](https://github.com/wijnen/python-websocketd)
-[python-webgame](https://github.com/wijnen/python-webgame)
-[Blender](http://blender.org)
-bitmap image editor (possibly Blender, more likely [Gimp](http://www.gimp.org) or similar)
-text editor, such as gedit.
-	Stay away from Microsoft editors; they put a BOM at the start of UTF-8
-	encoded text files, which breaks everything.
+## Requirements:
+- [M.GRL](https://github.com/aeva/m.grl)
+- [python-fhs](https://github.com/wijnen/python-fhs)
+- [python-network](https://github.com/wijnen/python-network)
+- [python-websocketd](https://github.com/wijnen/python-websocketd)
+- [python-webgame](https://github.com/wijnen/python-webgame)
+- [Blender](http://blender.org)
+- bitmap image editor (possibly Blender, more likely
+  [Gimp](http://www.gimp.org) or similar) text editor, such as gedit.  Stay
+  away from Microsoft editors; they put a BOM at the start of UTF-8 encoded
+  text files, which breaks everything.
 
-Prerequisites:
+## Prerequisites:
 - Basic knowledge of Python
 - Basic knowledge of Javascript
 - Model editing, rigging, and action editing in Blender
@@ -28,6 +28,12 @@ there using ``zip io_scene_jta.zip io_scene_jta/*`` .  Open Blender, go through
 user settings to addons and use the install from file button to install the
 newly created zip file.
 
+If you are using [vim](http://vim.org) as your text editor, you want to add this line to your .vimrc:
+
+    autocmd BufNewFile,BufRead *.gpy set filetype=python
+
+It will make vim recognize *.gpy files as python.
+
 # Introduction
 This tutorial teaches how to use Python-webgame through examples and
 excercises.  Explanations are kept to a minimum.
@@ -41,10 +47,10 @@ before.
 
 ## Example 0: Simple working (but useless) program
 This program does nothing.  It shows the basic structure of a game written with
-Python-webgame.  To make it work, create all the files with the proper content,
-set the main file to be executable and run it from the commandline.  Then point
-a browser to http://localhost:8891 to see the title screen.  When you create a
-game there, it will show you an empty screen that allows you to leave.
+Python-webgame.  To make it work, just go to the directory that holds
+non-game.gpy and run ``webgame-build``.  Then point a browser to
+http://localhost:8891 to see the title screen.  When you create a game there,
+it will show you an empty screen that only allows you to leave.
 
 * Read: non-game.gpy
 * Exercise: Make it run.
@@ -113,15 +119,22 @@ simultaneously.
 * Read: take5.gpy
 * Exercise: Scissors, Paper, Rock.
 
+# To be done
 The following is a plan for the rest of this tutorial; this part has not been made yet.
 
 - 2-D interface.
+
         + Quarto 2-D
         * Tic tac toe 2-D
+
 - Combine 2-D and 3-D.
+
         + Quarto *-D
         * Tic tac toe *-D
+
 - 2-D generated content.
+
         + Quarto generated.
         * Tic tac toe generated.
+
 - Events from server.
