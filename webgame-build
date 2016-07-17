@@ -54,9 +54,14 @@ name = config['name'] or main.capitalize()
 webbase = "\t\t<base href='{}'/>".format(config['base']) if config['base'] else ''
 modules = [x for x in os.listdir(config['src']) if x.endswith(os.extsep + 'py') and not os.path.isdir(os.path.join(config['src'], x))]
 jssrc = os.path.join(config['src'], 'html')
-js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
+if os.path.isdir(jssrc):
+	js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
+	assets = [x for x in os.listdir(jssrc) if os.path.isdir(os.path.join(jssrc, x))]
+else:
+	websocketd.log('Warning: no html directory found in {}; game will be useless'.format(config['src']))
+	js = []
+	assets = []
 js.sort()
-assets = [x for x in os.listdir(jssrc) if os.path.isdir(os.path.join(jssrc, x))]
 assets.sort()
 
 if os.path.exists(os.path.join(dest, 'html', main)):
