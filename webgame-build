@@ -99,10 +99,12 @@ for a in assets:
 	copy(os.path.join(jssrc, a), os.path.join(dest, 'html', main, a))
 
 # Write or link default files.
-with open(os.path.join(dest, 'html', main + os.extsep + 'html'), 'w') as f:
+index = os.path.join(dest, 'html', main, 'index' + os.extsep + 'html')
+with open(index, 'w') as f:
 	files = ["\t\t<script type='application/javascript' src='{}/{}'></script>".format(main, f) for f in js]
 	#print('name: {}\nbase: {}\nsource: {}'.format(name, webbase, files))
 	f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'html')).read().replace('#NAME#', name).replace('#MAIN#', main).replace('#BASE#', webbase).replace('#SOURCE#', '\n'.join(files)))
+copy(index, os.path.join(dest, 'html', 'index' + os.extsep + 'html'))
 
 def makeaudio(dirobj, dir):
 	if not os.path.isdir(dir):
