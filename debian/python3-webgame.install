@@ -1,4 +1,4 @@
-html/webgame.css /usr/share/python3-webgame
-html/webgame.html /usr/share/python3-webgame
-html/webgame.js /usr/share/python3-webgame
+html/webgame.css /usr/share/python3-webgame/html
+html/webgame.html /usr/share/python3-webgame/html
+html/webgame.js /usr/share/python3-webgame/html
 webgame-build /usr/bin
