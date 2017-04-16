@@ -32,11 +32,10 @@ class Shared_Object(collections.MutableMapping): # {{{
 	def __getattr__(self, key):
 		return self._members[key]
 	def __delattr__(self, key):
-		make_shared(self._path, self._target, key, None, send = self._alive, group = self._group)
 		if key in self._members and isinstance(self._members[key], (Shared_Object, Shared_Array)):
 			self._members[key]._die()
 		del self._members[key]
-		if self.alive:
+		if self._alive:
 			path = self._path[1:] + [key]
 			if self._target is None:
 				assert self._path[0] == 'Public'
@@ -49,11 +48,11 @@ class Shared_Object(collections.MutableMapping): # {{{
 				if self._target.connection:
 					self._target.connection._socket.Private_update.event(path)
 	def __getitem__(self, key):
-		return getattr(self, key)
+		return getattr(self, str(key))
 	def __setitem__(self, key, value):
-		return setattr(self, key, value)
+		return setattr(self, str(key), value)
 	def __delitem__(self, key):
-		return delattr(self, key)
+		return delattr(self, str(key))
 	def __len__(self):
 		return len(self._members)
 	def __iter__(self):
@@ -217,13 +216,6 @@ def broadcast_shared(target, path, value, group = None): # {{{
 # All connections (both viewers and players); keys are names.
 connections = {}
 
-# String to paste into javascript for loading asserts; two versions: [2d, 3d].
-loader_js = [None, None]
-
-# Whether or not 2d and 3d versions are available.
-have_2d = None
-have_3d = None
-
 # Generator type, for checking if things are generators.
 generator_type = type((lambda: (yield))())
 
@@ -286,7 +278,7 @@ class Instance: # Class for game instances. {{{
 				num_players = _num_players[0]
 			if num_players < _num_players[0]:
 				num_players = _num_players[0]
-			if num_players > _num_players[1]:
+			if _num_players[1] is not None and num_players > _num_players[1]:
 				num_players = _num_players[1]
 			title_game.game.Public.games.append(name)
 		else:
@@ -295,7 +287,7 @@ class Instance: # Class for game instances. {{{
 		for p in range(num_players):
 			self.game.add_player()
 		# Start game.
-		self.launch(self.game.run(), 'main')
+		self.launch(self.game.run(), 'main', run_now = True)
 		log("started new instance '%s'" % name)
 
 	def close(self):
@@ -406,11 +398,14 @@ class Instance: # Class for game instances. {{{
 		self.game.Public.players.pop(p)
 		self.game.players.pop(p)
 
-	def launch(self, f, name = 'nameless task'):
+	def launch(self, f, name = 'nameless task', run_now = False):
 		'''Record a generator as a task and schedule it for idle running.'''
 		t = Task(f, name)
 		self.tasks.append(t)
-		websocketd.add_idle(lambda: self.run(t, None))
+		if run_now:
+			self.run(t, None)
+		else:
+			websocketd.add_idle(lambda: self.run(t, None))
 		return t
 # }}}
 
@@ -527,7 +522,7 @@ class Title: # Class for default title game object. {{{
 						connection.num = i
 						break
 				else:
-					if len(instance.game.players) < _num_players[1]:
+					if _num_players[1] is None or len(instance.game.players) < _num_players[1]:
 						connection.num = instance.game.add_player()
 					else:
 						log('no more players allowed')
@@ -584,7 +579,7 @@ def leave(args): # Player leaves the game.  This is always available except from
 # }}}
 
 def Game(): # Main function to start a game. {{{
-	global server, title_game, have_2d, have_3d, _num_players
+	global server, title_game, _num_players
 	# Set up the game name.
 	if not hasattr(__main__, 'name') or __main__.name is None:
 		__main__.name = os.path.basename(sys.argv[0]).capitalize()
@@ -594,8 +589,6 @@ def Game(): # Main function to start a game. {{{
 	# Set up other constants.
 	if not hasattr(__main__, 'autokill'):
 		__main__.autokill = True
-	have_2d = fhs.read_data(os.path.join('html', '2d'), dir = True, opened = False) is not None
-	have_3d = fhs.read_data(os.path.join('html', '3d'), dir = True, opened = False) is not None or not have_2d
 	# Fill in min and max if not specified.
 	assert hasattr(__main__, 'num_players')
 	if isinstance(__main__.num_players, int):
@@ -603,18 +596,6 @@ def Game(): # Main function to start a game. {{{
 	else:
 		_num_players = __main__.num_players
 	assert 1 <= _num_players[0] and (_num_players[1] is None or _num_players[0] <= _num_players[1])
-	# Build asset string for inserting in js.
-	for subdir, use_3d in (('2d', False), ('3d', True)):
-		targets = []
-		for base in ('img', 'jta', 'gani', 'audio', 'text'):
-			for d in (os.path.join('html', base), os.path.join('html', subdir, base)):
-				for p in fhs.read_data(d, dir = True, multiple = True, opened = False):
-					targets.extend(f.encode('utf-8') for f in os.listdir(p) if not f.startswith('.') and not os.path.isdir(os.path.join(p, f)))
-		if len(targets) > 0:
-			loader_js[use_3d] = b'\n'.join(b"\tplease.load('" + f + b"');" for f in targets)
-		else:
-			# Nothing to load, but force the "finished loading" event to fire anyway.
-			loader_js[use_3d] = b'\twindow.dispatchEvent(new CustomEvent("mgrl_media_ready"));'
 	# Set up commands.
 	cmds['leave'] = {None: leave}
 	if hasattr(__main__, 'commands'):
@@ -622,9 +603,10 @@ def Game(): # Main function to start a game. {{{
 			cmds[c] = {None: __main__.commands[c]}
 	# Start up websockets server.
 	config = fhs.module_get_config('webgame')
-	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html', os.path.join('html', '2d'), os.path.join('html', '3d'))]
-	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = httpdirs[0] + httpdirs[1] + httpdirs[2])
+	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html', os.path.join('html', __main__.name.lower()))]
+	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = sum(httpdirs, []))
 	server.handle_ext('png', 'image/png')
+	server.handle_ext('svg', 'image/svg+xml')
 	server.handle_ext('jpg', 'image/jpeg')
 	server.handle_ext('jpeg', 'image/jpeg')
 	server.handle_ext('gif', 'image/gif')

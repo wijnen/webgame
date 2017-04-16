@@ -2,7 +2,6 @@
 // Global variables. {{{
 var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _mainscreen, _footer, _title_selection, _canvas;
 var _gametitle;
-var _title_screen;
 var title_gamelist = [];
 var serverobj, server;
 var _audio, audio;
@@ -14,7 +13,6 @@ var viewport = [-20, -15, 20, 15];
 // }}}
 
 AddEvent('load', function () { // {{{
-	_title_screen = true;
 	_gametitle = document.title;
 	_titlescreen = document.getElementById('title');
 	_mainscreen = document.getElementById('notitle');
@@ -31,12 +29,12 @@ AddEvent('load', function () { // {{{
 		please.gl.set_context('canvas');
 	else
 		please.dom.set_context('canvas');
-	please.set_search_path('img', '#MAIN#/img');
-	please.set_search_path('jta', '#MAIN#/jta');
-	please.set_search_path('gani', '#MAIN#/gani');
-	please.set_search_path('audio', '#MAIN#/audio');
-	please.set_search_path('glsl', '#MAIN#/glsl');
-	please.set_search_path('text', '#MAIN#/text');
+	please.set_search_path('img', 'img');
+	please.set_search_path('jta', 'jta');
+	please.set_search_path('gani', 'gani');
+	please.set_search_path('audio', 'audio');
+	please.set_search_path('glsl', 'glsl');
+	please.set_search_path('text', 'text');
 #LOAD#
 }); // }}}
 
@@ -193,15 +191,43 @@ function playercolor(num) { // {{{
 	return colors[num];
 } // }}}
 
+function _make_changes(target, value, changes, path) { // {{{
+	// Target is the old object
+	// Value is the new value
+	// Changes is the object that should be filled with changed values
+	// Path is the path in changes, which may not exist yet
+	if (!(value instanceof Object)) {
+		c = changes;
+		if (target != value) {
+			for (var i = 0; i < path.length - 1; ++i) {
+				if (c[path[i]] === undefined)
+					c[path[i]] = {};
+				c = c[path[i]];
+			}
+			c[path[path.length - 1]] = target;
+		}
+		return;
+	}
+	for (var i in value) {
+		path.push(i);
+		_make_changes(target ? target[i] : undefined, value[i], changes, path);
+		path.pop();
+	}
+} // }}}
+
 function _Public_update(path, value) { // {{{
+	//console.info('update', path, value);
+	var changes = {};
 	if (path !== undefined) {
 		if (path.length == 0) {
+			_make_changes(Public, value, changes, path);
 			Public = value;
 		}
 		else {
 			var target = Public;
 			for (var i = 0; i < path.length - 1; ++i)
 				target = target[path[i]];
+			_make_changes(target, value, changes, path);
 			if (value === undefined)
 				delete target[path[path.length - 1]];
 			else
@@ -210,7 +236,6 @@ function _Public_update(path, value) { // {{{
 	}
 	_makestate();
 	if (Public.name == '') {
-		_title_screen = true;
 		document.title = _gametitle;
 		// Set number of players for new games.
 		if (Public.min_players == Public.max_players) {
@@ -261,14 +286,13 @@ function _Public_update(path, value) { // {{{
 		_footer.AddClass('hidden');
 		please.renderer.overlay.AddClass('hidden');
 		if (window.title_Public_update !== undefined)
-			window.title_Public_update();
+			window.title_Public_update(changes);
 		if (window.title_update !== undefined)
 			window.title_update();
 		return;
 	}
-	if (_title_screen) {
+	if (changes['name'] == '') {
 		// Hide the titlescreen.
-		_title_screen = false;
 		_titlescreen.AddClass('hidden');
 		_mainscreen.RemoveClass('hidden');
 		_footer.RemoveClass('hidden');
@@ -280,8 +304,10 @@ function _Public_update(path, value) { // {{{
 		if (window.new_game)
 			window.new_game();
 	}
-	if (window.Public_update !== undefined)
-		window.Public_update();
+	else {
+		if (window.Public_update !== undefined)
+			window.Public_update(changes);
+	}
 	if (window.update !== undefined)
 		window.update();
 } // }}}
@@ -313,14 +339,17 @@ function _title_new() { // {{{
 } // }}}
 
 function _Private_update(path, value) { // {{{
+	var changes = {};
 	if (path !== undefined) {
 		if (path.length == 0) {
+			_make_changes(Private, value, changes, path);
 			Private = value;
 		}
 		else {
 			var target = Private;
 			for (var i = 0; i < path.length - 1; ++i)
 				target = target[path[i]];
+			_make_changes(target, value, changes, path);
 			if (value === undefined)
 				delete target[path[path.length - 1]];
 			else
@@ -336,7 +365,7 @@ function _Private_update(path, value) { // {{{
 		return;
 	}
 	if (window.Private_update !== undefined)
-		window.Private_update();
+		window.Private_update(changes);
 	if (window.update !== undefined)
 		window.update();
 } // }}}
