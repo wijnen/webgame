@@ -58,13 +58,10 @@ modules = [x for x in os.listdir(config['src']) if x.endswith(os.extsep + 'py') 
 jssrc = os.path.join(config['src'], 'html')
 if os.path.isdir(jssrc):
 	js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
-	assets = [x for x in os.listdir(jssrc) if os.path.isdir(os.path.join(jssrc, x))]
 else:
 	websocketd.log('Warning: no html directory found in {}; game will be useless'.format(config['src']))
 	js = []
-	assets = []
 js.sort()
-assets.sort()
 # }}}
 
 # Create destination directory. {{{
@@ -132,7 +129,7 @@ def find(srcbase, destbase, prefix, antisuffix): # {{{
 # Generate javascript load statements. {{{
 loader_js = [None, None]
 can = [False, False]
-target = [[], []]
+targets = [[], []]
 for suffix, antisuffix, use_3d in (('-2d', '-3d', False), ('-3d', '-2d', True)):
 	for base in ('img', 'jta', 'gani', 'audio', 'text'):
 		suffixtargets = find(os.path.join(jssrc, base + suffix), os.path.join(dest, 'html', main, base), '', antisuffix)
@@ -165,11 +162,11 @@ if not any(can):
 	}'''
 	loader_js = '''\
 	if (use_3d) {
-		{}
+		%s
 	}
 	else {
-		{}
-	}'''.format(loader_js[True], loader_js[False])
+		%s
+	}''' % (loader_js[True], loader_js[False])
 	for t in targets[False]:
 		copy(t[0], t[1])
 	for t in targets[True]:
@@ -179,8 +176,8 @@ elif can[False]:
 	loader_js = loader_js[True]
 	for t in targets[True]:
 		copy(t[0], t[1])
-	with open(os.path.join(dest, 'html', main, 'webgame' + os.extsep + 'js'), 'w') as f:
-		f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'js')).read().replace('#LOAD#', loader_js).replace('#AUDIO#', audio).replace('#USE3D#', use3d))
+with open(os.path.join(dest, 'html', main, 'webgame' + os.extsep + 'js'), 'w') as f:
+	f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'js')).read().replace('#LOAD#', loader_js).replace('#AUDIO#', audio).replace('#USE3D#', use3d))
 # }}}
 
 # Copy or link system files. {{{
@@ -195,7 +192,7 @@ copy(fhs.read_data('builders' + os.extsep + 'js', opened = False, packagename = 
 # Create main html file. {{{
 index = os.path.join(dest, 'html', main, 'index' + os.extsep + 'html')
 with open(index, 'w') as f:
-	files = ["\t\t<script type='application/javascript' src='{}/{}'></script>".format(main, f) for f in ['webgame.js'] + js]
+	files = ["\t\t<script type='application/javascript' src='{}/webgame.js'></script>".format(main)] + ["\t\t<script type='application/javascript' src='game/{}'></script>".format(f) for f in js]
 	#print('name: {}\nbase: {}\nsource: {}'.format(name, webbase, files))
 	f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'html')).read().replace('#NAME#', name).replace('#BASE#', webbase).replace('#SOURCE#', '\n'.join(files)))
 # Make it the default page.

@@ -68,7 +68,7 @@ function set_pile(i, value) {
 	piles[i] = tile[value];
 	piles[i].visible = true;
 	piles[i].on_click = function() { click_pile(i); };
-	piles[i].location = [i * 2 - 3, 1, 0];
+	piles[i].location = [i * 2 - 3, 1, pile_z(i)];
 	piles[i].scale = [.5, .5, .05];
 }
 
@@ -77,7 +77,7 @@ function set_hand(i, value, num) {
 	hand[i] = tile[value[0]];
 	hand[i].visible = true;
 	hand[i].on_click = function() { click_hand(i); };
-	hand[i].location = [i - (num - 1) / 2, 0, 0];
+	hand[i].location = [i - (num - 1) / 2, 0, hand_z(i)];
 	hand[i].scale = [.4, .4, .05];
 }
 
@@ -123,6 +123,7 @@ function click_pile(i) {
 		return;
 	server.play(Private.hand[selected][0], i);
 	selected = null;
+	update_z();
 }
 
 function click_hand(i) {
@@ -130,4 +131,22 @@ function click_hand(i) {
 		selected = null;
 	else
 		selected = i;
+	update_z();
+}
+
+function hand_z(i) {
+	if (selected !== null)
+		return selected == i ? 1 : -1;
+	return unselectable_hand(i) ? 0 : 1;
+}
+
+function pile_z(i) {
+	return unselectable_pile(i) ? 0 : 1;
+}
+
+function update_z() {
+	for (var i = 0; i < piles.length; ++i)
+		piles[i].location_z = pile_z(i);
+	for (var i = 0; i < hand.length; ++i)
+		hand[i].location_z = hand_z(i);
 }

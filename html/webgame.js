@@ -470,11 +470,19 @@ function _resize_window() { // {{{
 	if (size[0] == 0 || size[1] == 0)
 		return;
 	if (_canvas.width != size[0] || _canvas.height != size[1]) {
+		var max = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
+		if (size[0] > max) {
+			size = [max, size[1] / size[0] * max];
+			console.info('change size', size);
+		}
+		if (size[1] > max) {
+			size = [size[0] / size[1] * max, max];
+			console.info('change size', size);
+		}
 		_canvas.width = size[0];
 		_canvas.height = size[1];
-		if (use_3d) {
+		if (use_3d)
 			gl.viewport(0, 0, size[0], size[1]);
-		}
 		else {
 			var vw = viewport[2] - viewport[0];
 			var vh = viewport[3] - viewport[1];
