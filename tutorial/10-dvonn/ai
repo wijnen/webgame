@@ -1,0 +1,31 @@
+#!/usr/bin/python3
+
+import webgame_client
+import random
+import time
+
+delay = .2
+
+class AI:
+	def new_game(self):
+		#print('New game; {} {} {}'.format(Public, Private, name))
+		pass
+	def Public_update(self, changes):
+		#print('Public changed from:', changes)
+		pass
+	def Private_update(self, changes):
+		#print('Private changed from:', changes)
+		if 'setup' in changes and 'setup' in Private:
+			c = random.choice(Private['setup'])
+			time.sleep(delay)
+			game.setup(c)
+		if 'options' in changes and 'options' in Private:
+			o = random.choice(tuple(Private['options'].keys()))
+			time.sleep(delay)
+			game.pick(o)
+		if 'targets' in changes and 'targets' in Private:
+			t = random.choice(Private['targets'])
+			time.sleep(delay)
+			game.place(t)
+
+run()

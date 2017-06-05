@@ -6,9 +6,9 @@
 - [python-webgame](https://github.com/wijnen/python-webgame)
 - [Blender](http://blender.org)
 - bitmap image editor (possibly Blender, more likely
-  [Gimp](http://www.gimp.org) or similar) text editor, such as gedit.  Stay
-  away from Microsoft editors; they put a BOM at the start of UTF-8 encoded
-  text files, which breaks everything.
+  [Gimp](http://www.gimp.org) or similar)
+- Text editor, such as gedit.  Stay away from Microsoft editors; they put a BOM
+  at the start of UTF-8 encoded text files, which breaks everything.
 
 ## Prerequisites:
 - Basic knowledge of Python
@@ -38,12 +38,11 @@ It will make vim recognize \*.gpy files as python.
 This tutorial teaches how to use Python-webgame through examples and
 excercises.  Explanations are kept to a minimum.
 
-The code for the examples is in the examples directory, which is located in the
-same place as this file.  Every new feature is commented in the code.  Features
-that have been explained in earlier code do not always have a comment again.  Only
-files that are mentioned under "Read" have new material in them, but the other
-files may still be useful to better understand concepts that were explained
-before.
+The code for the examples is in the same place as this file, one directory per
+example.  Every new feature is commented in the code.  Features that have been
+explained in earlier code do not always have a comment again.  Only files that
+are mentioned under "Read" have new material in them, but the other files may
+still be useful to better understand concepts that were explained before.
 
 ## Example 0: Simple working (but useless) program: non-game
 This program does nothing.  It shows the basic structure of a game written with

@@ -17,18 +17,19 @@ If modules that are used by the builder are included from the main source
 directory, they are copied into the build directory.  network, websocketd and
 webgame are imported so this method can be used for them.
 
-game
-modules/game/support.py
+<GAMENAME>
+modules/game/*.py
 html/mgrl.js
 html/gl-matrix.js
 html/builders.js
 html/rpc.js
 html/webgame.js
 html/webgame.css
-html/game/main.js
+html/game/*.js
 html/game/index.html
-html/game/img/texture.png
-html/game/jta/object.jta
+html/game/img/*.png
+html/game/jta/*.jta
+...
 }}}'''
 
 # Imports and config. {{{
@@ -132,10 +133,10 @@ can = [False, False]
 targets = [[], []]
 for suffix, antisuffix, use_3d in (('-2d', '-3d', False), ('-3d', '-2d', True)):
 	for base in ('img', 'jta', 'gani', 'audio', 'text'):
-		suffixtargets = find(os.path.join(jssrc, base + suffix), os.path.join(dest, 'html', main, base), '', antisuffix)
+		suffixtargets = find(os.path.join(jssrc, base + suffix), os.path.join(dest, 'html', 'game', base), '', antisuffix)
 		can[use_3d] = can[use_3d] or os.path.exists(os.path.join(jssrc, base + suffix))
 		targets[use_3d].extend(suffixtargets)
-		targets[use_3d].extend(find(os.path.join(jssrc, base), os.path.join(dest, 'html', main, base), '', antisuffix))
+		targets[use_3d].extend(find(os.path.join(jssrc, base), os.path.join(dest, 'html', 'game', base), '', antisuffix))
 	if len(targets[use_3d]) > 0:
 		can[use_3d] = can[use_3d] or any(os.path.splitext(x[0])[0].endswith(suffix) for x in targets[use_3d])
 		loader_js[use_3d] = ["\tplease.load('{}');".format(f[2]) for f in targets[use_3d]]
@@ -176,13 +177,12 @@ elif can[False]:
 	loader_js = loader_js[True]
 	for t in targets[True]:
 		copy(t[0], t[1])
-with open(os.path.join(dest, 'html', main, 'webgame' + os.extsep + 'js'), 'w') as f:
+with open(os.path.join(dest, 'html', 'webgame' + os.extsep + 'js'), 'w') as f:
 	f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'js')).read().replace('#LOAD#', loader_js).replace('#AUDIO#', audio).replace('#USE3D#', use3d))
 # }}}
 
 # Copy or link system files. {{{
-with open(os.path.join(dest, 'html', 'rpc' + os.extsep + 'js'), 'w') as f:
-	f.write(fhs.read_data('rpc' + os.extsep + 'js', packagename = 'python3-websocketd').read().replace('#WEBSOCKET#', "(window.hasOwnProperty('MozWebSocket') ? new MozWebSocket('ws://' + document.location.host + '/websocket/') : new WebSocket('ws://' + document.location.host + '/websocket/'))"))
+copy(fhs.read_data('rpc' + os.extsep + 'js', packagename = 'python3-websocketd'), os.path.join(dest, 'html', 'rpc' + os.extsep + 'js'))
 copy(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'css'), opened = False), os.path.join(dest, 'html', 'webgame' + os.extsep + 'css'))
 copy(fhs.read_data(os.path.join('html', 'gl-matrix' + os.extsep + 'js'), opened = False), os.path.join(dest, 'html', 'gl-matrix' + os.extsep + 'js'))
 copy(fhs.read_data(os.path.join('html', 'mgrl' + os.extsep + 'js'), opened = False), os.path.join(dest, 'html', 'mgrl' + os.extsep + 'js'))
@@ -190,17 +190,17 @@ copy(fhs.read_data('builders' + os.extsep + 'js', opened = False, packagename = 
 # }}}
 
 # Create main html file. {{{
-index = os.path.join(dest, 'html', main, 'index' + os.extsep + 'html')
+index = os.path.join(dest, 'html', 'game', 'index' + os.extsep + 'html')
 with open(index, 'w') as f:
-	files = ["\t\t<script type='application/javascript' src='{}/webgame.js'></script>".format(main)] + ["\t\t<script type='application/javascript' src='game/{}'></script>".format(f) for f in js]
+	files = ["\t\t<script type='application/javascript' src='webgame.js'></script>"] + ["\t\t<script type='application/javascript' src='game/{}'></script>".format(f) for f in js]
 	#print('name: {}\nbase: {}\nsource: {}'.format(name, webbase, files))
 	f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'html')).read().replace('#NAME#', name).replace('#BASE#', webbase).replace('#SOURCE#', '\n'.join(files)))
 # Make it the default page.
 copy(index, os.path.join(dest, 'html', 'index' + os.extsep + 'html'))
 # }}}
 
-# Wrtie main python file. {{{
-with open(os.path.join(dest, 'game'), 'w') as f:
+# Write main python file. {{{
+with open(os.path.join(dest, main), 'w') as f:
 	f.write('#!/usr/bin/python3\n')
 	f.write('import sys\n')
 	f.write("sys.path = ['{}'] + sys.path\n".format(os.path.join(dest, 'modules')))
@@ -209,7 +209,7 @@ with open(os.path.join(dest, 'game'), 'w') as f:
 	f.write('import webgame\n')
 	f.write(open(os.path.join(config['src'], main + os.extsep + 'gpy')).read())
 	f.write('\nwebgame.Game()\n')
-os.chmod(os.path.join(dest, 'game'), 0o755)
+os.chmod(os.path.join(dest, main), 0o755)
 # }}}
 
 # Copy bundled modules. {{{
@@ -231,7 +231,7 @@ for m in sys.modules:
 
 # Run. {{{
 if config['run']:
-	subprocess.Popen([os.path.join(dest, 'game')], close_fds = True).communicate()
+	subprocess.Popen([os.path.join(dest, main)], close_fds = True).communicate()
 # }}}
 
 # vim: set foldmethod=marker :

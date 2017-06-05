@@ -2,3 +2,4 @@ html/gl-matrix.js
 html/mgrl.js
 example/quarto/__pycache__/
 example/quarto/webgame.py
+__pycache__/

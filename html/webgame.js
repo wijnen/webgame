@@ -121,10 +121,14 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 				r += event.detail;
 			});
 		}
+		please.set_viewport(renderer);
 	}
 	else {
+		camera.look_at = function() { return [camera.location_x, camera.location_y, 0]; };
+		camera.location = function() { return [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 100]; };
 	}
 	camera.activate();
+	camera.update_camera();
 
 	_audio = {};
 	audio = {};
@@ -173,7 +177,6 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 		function() { _body.RemoveClass('disconnected'); },
 		function() { _body.AddClass('disconnected'); });
 	server = serverobj.proxy;
-	please.set_viewport(renderer);
 	window.AddEvent('resize', _resize_window);
 	if (!use_3d && window.init_2d !== undefined) window.init_2d();
 	if (use_3d && window.init_3d !== undefined) window.init_3d();
@@ -196,44 +199,63 @@ function _make_changes(target, value, changes, path) { // {{{
 	// Value is the new value
 	// Changes is the object that should be filled with changed values
 	// Path is the path in changes, which may not exist yet
+	//console.info('changes target', target, 'value', value, 'changes', changes, 'path', path);
 	if (!(value instanceof Object)) {
 		c = changes;
-		if (target != value) {
-			for (var i = 0; i < path.length - 1; ++i) {
-				if (c[path[i]] === undefined)
-					c[path[i]] = {};
-				c = c[path[i]];
-			}
-			c[path[path.length - 1]] = target;
+		for (var i = 0; i < path.length - 1; ++i) {
+			if (c[path[i]] === undefined)
+				c[path[i]] = {};
+			c = c[path[i]];
 		}
+		c[path[path.length - 1]] = target;
 		return;
 	}
+	var obj = target ? target[path[path.length - 1]] : undefined;
 	for (var i in value) {
 		path.push(i);
-		_make_changes(target ? target[i] : undefined, value[i], changes, path);
+		_make_changes(obj ? obj[i] : undefined, value[i], changes, path);
 		path.pop();
 	}
+	if (obj instanceof Object) {
+		for (var v in obj) {
+			if (value !== undefined && value[v] !== undefined)
+				continue;
+			path.push(v);
+			_make_changes(obj[v], undefined, changes, path);
+			path.pop();
+		}
+	}
+	//console.info('result', changes);
+} // }}}
+
+function _update(obj, path, value) { // {{{
+	var changes;
+	//console.info('update', obj[0], 'path', path, 'value', value);
+	var target = obj[0];
+	for (var i = 0; i < path.length - 1; ++i)
+		target = target[path[i]];
+	if (path.length > 0) {
+		changes = {};
+		_make_changes(target, value, changes, path);
+		target[path[path.length - 1]] = value;
+	}
+	else if (obj[0] === Public) {
+		changes = Public;
+		Public = value;
+	}
+	else if (obj[0] === Private) {
+		changes = Private;
+		Private = value;
+	}
+	else
+		console.error('BUG: invalid object for update', obj[0]);
+	//console.info('*************', changes);
+	return changes;
 } // }}}
 
 function _Public_update(path, value) { // {{{
 	//console.info('update', path, value);
-	var changes = {};
-	if (path !== undefined) {
-		if (path.length == 0) {
-			_make_changes(Public, value, changes, path);
-			Public = value;
-		}
-		else {
-			var target = Public;
-			for (var i = 0; i < path.length - 1; ++i)
-				target = target[path[i]];
-			_make_changes(target, value, changes, path);
-			if (value === undefined)
-				delete target[path[path.length - 1]];
-			else
-				target[path[path.length - 1]] = value;
-		}
-	}
+	var changes = _update([Public], path, value);
 	_makestate();
 	if (Public.name == '') {
 		document.title = _gametitle;
@@ -303,13 +325,17 @@ function _Public_update(path, value) { // {{{
 			window.update_canvas(please.dom.context);
 		if (window.new_game)
 			window.new_game();
+		if (window.Private_update !== undefined)
+			window.Private_update(Private);
+		else if (window.update !== undefined)
+			window.update();
 	}
 	else {
 		if (window.Public_update !== undefined)
 			window.Public_update(changes);
+		else if (window.update !== undefined)
+			window.update();
 	}
-	if (window.update !== undefined)
-		window.update();
 } // }}}
 
 function title_make_option(select, name, n) { // {{{
@@ -339,23 +365,7 @@ function _title_new() { // {{{
 } // }}}
 
 function _Private_update(path, value) { // {{{
-	var changes = {};
-	if (path !== undefined) {
-		if (path.length == 0) {
-			_make_changes(Private, value, changes, path);
-			Private = value;
-		}
-		else {
-			var target = Private;
-			for (var i = 0; i < path.length - 1; ++i)
-				target = target[path[i]];
-			_make_changes(target, value, changes, path);
-			if (value === undefined)
-				delete target[path[path.length - 1]];
-			else
-				target[path[path.length - 1]] = value;
-		}
-	}
+	var changes = _update([Private], path, value);
 	_makestate();
 	if (Public.name == '') {
 		if (window.title_Private_update !== undefined)
@@ -366,7 +376,7 @@ function _Private_update(path, value) { // {{{
 	}
 	if (window.Private_update !== undefined)
 		window.Private_update(changes);
-	if (window.update !== undefined)
+	else if (window.update !== undefined)
 		window.update();
 } // }}}
 
@@ -398,8 +408,8 @@ function _makestate() { // {{{
 var _canvas_list = [];
 var _div_list = [];
 
-function new_canvas(w, h, name, redraw) { // {{{
-	var div = please.overlay.new_element(name);
+function new_canvas(w, h, redraw) { // {{{
+	var div = please.overlay.new_element();
 	var node = new please.GraphNode();
 	node.div = div;
 	graph.add(node);
@@ -435,8 +445,8 @@ function del_canvas(node) { // {{{
 	please.overlay.remove_element(node.div);
 } // }}}
 
-function new_div(w, h, pw, ph, name, redraw) { // {{{
-	var div = please.overlay.new_element(name);
+function new_div(w, h, pw, ph, redraw) { // {{{
+	var div = please.overlay.new_element();
 	var node = new please.GraphNode();
 	node.div = div;
 	graph.add(node);
@@ -470,17 +480,21 @@ function _resize_window() { // {{{
 	if (size[0] == 0 || size[1] == 0)
 		return;
 	if (_canvas.width != size[0] || _canvas.height != size[1]) {
-		var max = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
-		if (size[0] > max) {
-			size = [max, size[1] / size[0] * max];
-			console.info('change size', size);
-		}
-		if (size[1] > max) {
-			size = [size[0] / size[1] * max, max];
-			console.info('change size', size);
+		if (use_3d) {
+			var max = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
+			if (size[0] > max) {
+				size = [max, size[1] / size[0] * max];
+				//console.info('change size', size);
+			}
+			if (size[1] > max) {
+				size = [size[0] / size[1] * max, max];
+				//console.info('change size', size);
+			}
 		}
 		_canvas.width = size[0];
 		_canvas.height = size[1];
+		camera.width = _canvas.width;
+		camera.height = _canvas.height;
 		if (use_3d)
 			gl.viewport(0, 0, size[0], size[1]);
 		else {
@@ -507,6 +521,19 @@ window.AddEvent('mgrl_overlay_aligned', function () { // {{{
 }); // }}}
 
 window.AddEvent('mgrl_dom_context_changed', function() { // {{{
+	please.dom.context.beginPath();
+	var w = please.dom.canvas.width / please.dom.orthographic_grid;
+	var h = please.dom.canvas.height / please.dom.orthographic_grid;
+	please.dom.context.rect(-w / 2, -h / 2, w, h);
+	please.dom.context.fillStyle = 'white';
+	please.dom.context.fill();
+	if (window.camera !== undefined)
+		please.dom.context.translate(-camera.location_x, -camera.location_y);
 	if (window.update_canvas && !use_3d)
 		window.update_canvas(please.dom.context);
 }); // }}}
+
+function pos_from_event(event) { // {{{
+	var pos = please.dom.pos_from_event(event.clientX, event.clientY);
+	return [pos[0] + camera.location_x, pos[1] + camera.location_y];
+} // }}}
