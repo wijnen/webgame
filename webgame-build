@@ -182,7 +182,7 @@ with open(os.path.join(dest, 'html', 'webgame' + os.extsep + 'js'), 'w') as f:
 # }}}
 
 # Copy or link system files. {{{
-copy(fhs.read_data('rpc' + os.extsep + 'js', packagename = 'python3-websocketd'), os.path.join(dest, 'html', 'rpc' + os.extsep + 'js'))
+copy(fhs.read_data('rpc' + os.extsep + 'js', packagename = 'python3-websocketd', opened = False), os.path.join(dest, 'html', 'rpc' + os.extsep + 'js'))
 copy(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'css'), opened = False), os.path.join(dest, 'html', 'webgame' + os.extsep + 'css'))
 copy(fhs.read_data(os.path.join('html', 'gl-matrix' + os.extsep + 'js'), opened = False), os.path.join(dest, 'html', 'gl-matrix' + os.extsep + 'js'))
 copy(fhs.read_data(os.path.join('html', 'mgrl' + os.extsep + 'js'), opened = False), os.path.join(dest, 'html', 'mgrl' + os.extsep + 'js'))

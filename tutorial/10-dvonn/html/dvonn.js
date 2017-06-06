@@ -4,15 +4,27 @@ viewport = [0, -1, 12, 5];
 // Global variables.
 piles = {};
 
+// This class handles a pile of tiles.  After creation, it must be set() to its
+// position.  A pile of tiles is represented in the browser as a canvas on
+// which the top tile is drawn, with a border indicating if there is a red tile
+// in the pile.  On top of the canvas there is an overlay div with the number
+// of tiles in the pile.
 function Pile() { // {{{
 	// Build the pile.
 	var self = this;
 	this.data = [];
+	// This function is registered below to be called when the canvas
+	// changes.  It is also called by this program when the contents have
+	// changed.
 	this.redraw = function(node) { // {{{
+		// Ignore redraw events before set() is called.
 		if (self.data.length == 0)
 			return;
+		// Draw a circle; make the size depend on the number of tiles.
+		var r = self.data.length >= 5 ? .45 : .2 + .05 * self.data.length;
 		node.context.beginPath();
-		node.context.arc(0, 0, .45, 0, 2 * Math.PI);
+		node.context.arc(0, 0, r, 0, 2 * Math.PI);
+		// Find out whether there is a red tile in the pile.
 		var alive = false;
 		for (var i = 0; i < self.data.length; ++i) {
 			if (self.data[i] == -1) {
@@ -21,19 +33,27 @@ function Pile() { // {{{
 			}
 		}
 		var owner = self.data[self.data.length - 1];
+		// Draw the tile and the border.
 		node.context.fillStyle = {'-1': 'red', '0': 'white', '1': 'black'}[owner];
+		// Use colors with high contrast.  Don't use a single color
+		// that works on all backgrounds, such as green, because that
+		// doesn't work well for color blind people.
+		node.overlay_div.style.color = {'-1': 'white', '0': 'black', '1': 'white'}[owner];
 		node.context.fill();
 		node.context.strokeStyle = alive ? 'red' : 'gray';
 		node.context.lineWidth = .1;
 		node.context.stroke();
 	}; // }}}
+	// Create a canvas of size (1,1) in world coordinates and register the
+	// redraw function.
 	this.node = new_canvas(1, 1, this.redraw);
-	this.div = please.overlay.new_element(this.node);
-	this.div.style.pointerEvents = 'none';
-	this.div.style.color = 'green';
+	// Create the overlay on top of it with the number of tiles.
+	// Make it a member of the node, so its color can be easily changed in redraw.
+	this.node.overlay_div = please.overlay.new_element(this.node);
+	// Disable pointer events on overlay, so the canvas can handle them.
+	this.node.overlay_div.style.pointerEvents = 'none';
 	this.node.canvas.style.pointerEvents = 'auto';
 	this.node.canvas.onclick = function() { // {{{
-		console.info(Private.options, Private.targets, self.x, self.y);
 		if (Private.options !== undefined && Private.options[self.x + '.' + self.y] !== undefined) {
 			server.pick(self.x + '.' + self.y);
 			return;
@@ -49,7 +69,7 @@ function Pile() { // {{{
 	}; // }}}
 	this.kill = function() { // {{{
 		// Kill the pile.
-		please.overlay.remove_element(this.div);
+		please.overlay.remove_element(this.node.overlay_div);
 		del_canvas(this.node);
 	}; // }}}
 	this.set = function(x, y, data) { // {{{
@@ -61,13 +81,15 @@ function Pile() { // {{{
 		self.x = x;
 		self.y = y;
 		self.node.location = [x + y * .5, y, 0];
-		self.div.ClearAll().AddText(data.length);
+		self.node.overlay_div.ClearAll().AddText(data.length);
 		self.data = data;
 		self.redraw(this.node);
 	}; // }}}
 } // }}}
 
 function update_pos(pos) { // {{{
+	// Update a single pile based on the information in Public.
+	// Create data structures as needed.
 	var active = Public.board[pos] !== undefined && Public.board[pos].length > 0;
 	var parts = pos.split('.');
 	var x = Number(parts[0]);
@@ -87,10 +109,12 @@ function update_pos(pos) { // {{{
 } // }}}
 
 function new_game() { // {{{
-	// Clear the board.
+	// Update the board to the current situation.
+	// This may not be empty; a game can be joined while it is in progress.
 	for (var pos in Public.board)
 		update_pos(pos);
 	please.renderer.overlay.style.pointerEvents = 'none';
+	// Allow pointer events on background for setup phase.
 	please.dom.canvas.style.pointerEvents = 'auto';
 	please.dom.canvas.onclick = function(event) {
 		var pos = pos_from_event(event);
@@ -114,6 +138,7 @@ function Public_update(changes) { // {{{
 		update_pos(pos);
 } // }}}
 
+// This function is called automatically when the background needs to be updated.
 function update_canvas(ctx) { // {{{
 	ctx.beginPath();
 	for (var i = 0; i < 11; ++i) {
@@ -122,8 +147,9 @@ function update_canvas(ctx) { // {{{
 				continue;
 			var x = i + .5 * j;
 			var y = j;
-			ctx.moveTo(x + .45, y);
-			ctx.arc(x, y, .45, 0, 2 * Math.PI);
+			var r = .1;
+			ctx.moveTo(x + r, y);
+			ctx.arc(x, y, r, 0, 2 * Math.PI);
 		}
 	}
 	ctx.fillStyle = '#ccc';

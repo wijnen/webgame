@@ -120,15 +120,15 @@ handled from a main loop.
 * Read: take5.gpy
 * Exercise: Create scissors, paper, rock.
 
-# To be done
-The following is a plan for the rest of this tutorial; this part has not been made yet.
-
 ## Example 10: 2-D interface: dvonn
 The 2-D system of m.grl to allow computers with less resources to play the
 game.
 
-* Read: html/quarto-2d.js
+* Read: html/img-2d/README.txt, html/dvonn.js
 * Excercise: Adapt tic tac toe to 2-D; keep a copy of the 3-D version.
+
+# To be done
+The following is a plan for the rest of this tutorial; this part has not been made yet.
 
 ## Example 11: Multi-dimensional output
 This merges examples 7 and 10, allowing clients to choose if they want to use
