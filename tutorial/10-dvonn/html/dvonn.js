@@ -1,4 +1,5 @@
 // use strict;
+// vim: set foldmethod=marker :
 
 viewport = [0, -1, 12, 5];
 // Global variables.
@@ -131,10 +132,10 @@ function new_game() { // {{{
 	};
 } // }}}
 
-function Public_update(changes) { // {{{
-	if (!changes.board)
+function update() { // {{{
+	if (!Public.board)
 		return;
-	for (var pos in changes.board)
+	for (var pos in Public.board)
 		update_pos(pos);
 } // }}}
 

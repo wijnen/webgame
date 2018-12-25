@@ -12,7 +12,7 @@ function init() {
 	var above = new please.GraphNode();
 	// Add it to the monkey (not the graph) so it moves with the monkey.
 	monkey.add(above);
-	// It's location is 1.2 units above the monkey's location.
+	// Its location is 1.2 units above the monkey's location.
 	above.location = [0, 0, 1.2];
 	text = please.overlay.new_element();
 	text.bind_to_node(above);

@@ -18,21 +18,34 @@ fhs.module_init('webgame', {'port': 8891, 'tls': False})
 server = None
 
 # Shared object handling. {{{
+'''The Shared_Object, Shared_Instance and Shared_Array behave as javascript
+objects, objects and arrays respectively. Additionally, any changes made to
+them are synchronized over the network with any clients that are supposed to
+receive them (depending of whether they are part of Public or Private).
+'''
+def is_shared(obj):
+	return isinstance(obj, (Shared_Object, Shared_Instance, Shared_Array))
+
 class Shared_Object(collections.MutableMapping): # {{{
 	def __init__(self, path, target, group):
 		self.__dict__['_path'] = path
 		self.__dict__['_target'] = target
+		self.__dict__['_group'] = group
 		self.__dict__['_members'] = {}
 		self.__dict__['_alive'] = False
+		self.__dict__['_block_send'] = False
+	def _setup(self, path, target, group):
+		self.__dict__['_path'] = path
+		self.__dict__['_target'] = target
 		self.__dict__['_group'] = group
 	def __setattr__(self, key, value):
-		if key in self._members and isinstance(self._members[key], (Shared_Object, Shared_Array)):
+		if key in self._members and is_shared(self._members[key]):
 			self._members[key]._die()
-		self._members[key] = make_shared(self._path, self._target, key, value, send = self._alive, group = self._group)
+		self._members[key] = make_shared(self._path, self._target, key, value, send = self._alive and not self._block_send, group = self._group)
 	def __getattr__(self, key):
 		return self._members[key]
 	def __delattr__(self, key):
-		if key in self._members and isinstance(self._members[key], (Shared_Object, Shared_Array)):
+		if key in self._members and is_shared(self._members[key]):
 			self._members[key]._die()
 		del self._members[key]
 		if self._alive:
@@ -58,19 +71,23 @@ class Shared_Object(collections.MutableMapping): # {{{
 	def __iter__(self):
 		yield from iter(self._members)
 	def _live(self):
+		self.__dict__['_block_send'] = True
 		self.__dict__['_alive'] = True
 		for i in self._members:
-			if isinstance(self._members[i], (Shared_Object, Shared_Array)):
+			# Set every item to its value, so the path is set up.
+			setattr(self, i, self._members[i])
+			if is_shared(self._members[i]):
 				self._members[i]._live()
+		self.__dict__['_block_send'] = False
 	def _die(self):
 		self.__dict__['_alive'] = False
 		for i in self._members:
-			if isinstance(self._members[i], (Shared_Object, Shared_Array)):
+			if is_shared(self._members[i]):
 				self._members[i]._die()
 	def _json(self):
 		ret = {}
 		for k, v in self._members.items():
-			if isinstance(v, (Shared_Object, Shared_Array)):
+			if is_shared(v):
 				ret[k] = v._json()
 			else:
 				ret[k] = v
@@ -79,30 +96,118 @@ class Shared_Object(collections.MutableMapping): # {{{
 		return '<shared ' + str(dict(self)) + ' >'
 # }}}
 
+class Shared_Instance(collections.MutableMapping): # {{{
+	def _setup(self, path, target, group):
+		self.__dict__['_alive'] = False
+		self.__dict__['_path'] = path
+		self.__dict__['_target'] = target
+		self.__dict__['_group'] = group
+		self.__dict__['_block_send'] = False
+	def __setattr__(self, key, value):
+		if hasattr(self, key):
+			old = getattr(self, key)
+			if is_shared(old):
+				old._die()
+		if key.startswith('_'):
+			self.__dict__[key] = value
+		else:
+			self.__dict__[key] = make_shared(getattr(self, '_path', []), getattr(self, '_target', None), key, value, send = getattr(self, '_alive', not getattr(self, '_block_send', True)), group = getattr(self, '_group', None))
+			print('set %s to %s' % (key, self.__dict__[key]))
+	def __delattr__(self, key):
+		old = getattr(self, key)
+		if is_shared(old):
+			old._die()
+		delattr(super(), key)
+		if hasattr(self, '_alive') and self._alive:
+			path = self._path[1:] + [key]
+			if self._target is None:
+				assert self._path[0] == 'Public'
+				server.broadcast[self._group].Public_update(path)
+			elif self._path[0] == 'Public':
+				assert self._group in self._target.connection._socket.groups
+				if self._target.connection:
+					self._target.connection._socket.Public_update.event(path)
+			else:
+				if self._target.connection:
+					self._target.connection._socket.Private_update.event(path)
+	def __getitem__(self, key):
+		return getattr(self, str(key))
+	def __setitem__(self, key, value):
+		return setattr(self, str(key), value)
+	def __delitem__(self, key):
+		return delattr(self, str(key))
+	def __iter__(self):
+		for attr in dir(self):
+			if attr.startswith('_'):
+				continue
+			prop = getattr(self, attr)
+			if not is_shared(prop) and not isinstance(prop, (str, bytes, int, float, bool, type(None))):
+				continue
+			yield attr
+	def __len__(self):
+		return sum(1 for i in self)
+	def _live(self):
+		assert not getattr(self, '_alive', False)
+		self.__dict__['_block_send'] = True
+		self.__dict__['_alive'] = True
+		for i in self:
+			# Set every item to its value, so the path is set up.
+			obj = getattr(self, i)
+			setattr(self, i, obj)
+			obj = getattr(self, i)
+			if is_shared(obj):
+				obj._live()
+		self.__dict__['_block_send'] = False
+	def _die(self):
+		self.__dict__['_alive'] = False
+		for i in self:
+			obj = getattr(self, i)
+			if is_shared(obj):
+				obj._die()
+	def _json(self):
+		ret = {}
+		for k in self:
+			v = getattr(self, k)
+			if is_shared(v):
+				ret[k] = v._json()
+			else:
+				ret[k] = v
+		return ret
+	def __str__(self):
+		return '<shared instance ' + str(self._json()) + ' >'
+# Make it accessible from main.
+__main__.Shared = Shared_Instance
+# }}}
+
 class Shared_Array(collections.MutableSequence): # {{{
+	def _setup(self, path, target, group):
+		self.path = path
+		self.target = target
+		self.group = group
 	def __init__(self, path, target, group):
 		self.path = path
 		self.target = target
+		self.group = group
 		self.data = []
 		self.alive = False
-		self.group = group
+		self.block_send = False
 	def __setitem__(self, index, value):
 		if index < 0:
 			index += len(self.data)
 		assert 0 <= index < len(self.data)
-		if isinstance(self.data[index], (Shared_Object, Shared_Array)):
+		if is_shared(self.data[index]):
 			self.data[index]._die()
-		self.data[index] = make_shared(self.path, self.target, index, value, send = self.alive, group = self.group)
+		self.data[index] = make_shared(self.path, self.target, index, value, send = self.alive and not self.block_send, group = self.group)
 	def __getitem__(self, index):
 		return self.data[index]
 	def __delitem__(self, index):
 		if index < 0:
 			index += len(self.data)
 		assert 0 <= index < len(self.data)
-		if isinstance(self.data[index], (Shared_Object, Shared_Array)):
+		if is_shared(self.data[index]):
 			self.data[index]._die()
 		for i in range(index, len(self.data) - 1):
-			self[i] = make_shared(self.path, self.target, i, self[i + 1], send = self.alive, group = self.group)
+			self[i] = make_shared(self.path, self.target, i, self[i + 1], send = self.alive and not self.block_send, group = self.group)
 		self.data.pop()
 		if self.alive:
 			path = self.path[1:] + ['length']
@@ -127,28 +232,32 @@ class Shared_Array(collections.MutableSequence): # {{{
 		if index < len(self.data):
 			self.data.append(make_shared(self.path, self.target, len(self.data), self.data[-1], send = False, group = self.group))
 			for i in range(len(self.data) - 2, index, -1):
-				if isinstance(self.data[i], (Shared_Object, Shared_Array)):
+				if is_shared(self.data[i]):
 					self.data[i]._die()
 				self.data[i] = make_shared(self.path, self.target, i, self[i - 1], send = False, group = self.group)
 			self.data[index] = make_shared(self.path, self.target, index, obj, send = False, group = self.group)
 			if self.target is None or self.target.connection is not None:
 				broadcast_shared(self.target, self.path, self)
 		else:
-			self.data.append(make_shared(self.path, self.target, index, obj, send = self.alive, group = self.group))
+			self.data.append(make_shared(self.path, self.target, index, obj, send = self.alive and not self.block_send, group = self.group))
 	def _live(self):
+		self.block_send = True
 		self.alive = True
-		for i in self.data:
-			if isinstance(i, (Shared_Object, Shared_Array)):
+		for num, i in enumerate(self.data):
+			# Set every item to its value, so the path is set up.
+			self[num] = i
+			if is_shared(i):
 				i._live()
+		self.block_send = False
 	def _die(self):
 		self.alive = False
 		for i in self.data:
-			if isinstance(i, (Shared_Object, Shared_Array)):
+			if is_shared(i):
 				i._die()
 	def _json(self):
 		ret = []
 		for v in self.data:
-			if isinstance(v, (Shared_Object, Shared_Array)):
+			if is_shared(v):
 				ret.append(v._json())
 			else:
 				ret.append(v)
@@ -160,7 +269,14 @@ class Shared_Array(collections.MutableSequence): # {{{
 def make_shared(parent_path, target, key, value, send, group): # {{{
 	path = parent_path.copy()
 	path.append(key)
-	if isinstance(value, (tuple, list)):
+	if is_shared(value):
+		value._setup(path, target, group)
+		newvalue = value
+		if send:
+			newvalue._live()
+			if target is None or target.connection is not None:
+				broadcast_shared(target and target.connection, path, newvalue, group)
+	elif isinstance(value, (tuple, list)):
 		newvalue = Shared_Array(path, target, group)
 		for i, x in enumerate(value):
 			newvalue.append(make_shared(path, target, i, x, False, group))
@@ -176,11 +292,13 @@ def make_shared(parent_path, target, key, value, send, group): # {{{
 			newvalue._live()
 			if target is None or target.connection is not None:
 				broadcast_shared(target and target.connection, path, newvalue, group)
-	else:
+	elif isinstance(value, (str, bytes, int, float, bool, type(None))):
 		newvalue = value
 		if send:
 			if target is None or target.connection is not None:
 				broadcast_shared(target and target.connection, path, newvalue, group)
+	else:
+		raise AssertionError('item %s (type %s) cannot be shared' % (value, type(value)))
 	return newvalue
 # }}}
 
@@ -441,7 +559,7 @@ class Connection: # {{{
 		self._socket.groups.add(title_game.game.Public.name)
 		self.num = None
 		# Inform about state.
-		self._socket.name.event(self.name)
+		self._socket.webgame_init(self.name)	# TODO: Add use3d, file list and audio.
 		broadcast_shared(self, ['Public'], self.instance.game.Public)
 		broadcast_shared(self, ['Private'], None, title_game.game.Public.name)
 	def _closed(self):
@@ -624,7 +742,7 @@ def Game(): # Main function to start a game. {{{
 		title_game = Instance(__main__.Title, '')
 	else:
 		title_game = Instance(Title, '')
-	log('Game "%s" started' % __main__.name)
+	log('Game "%s" started, listening on port %s' % (__main__.name, config['port']))
 	# Main loop.
 	websocketd.fgloop()
 	# End of game.  Do anything to clean up?

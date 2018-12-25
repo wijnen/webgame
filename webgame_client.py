@@ -1,3 +1,26 @@
+'''webgame_client.py - module for writing a webgame AI client.
+
+This module defines the AI class, which conects to a webgame server. It defines
+the run() function in the main program, which should be called as the only
+action (optionally, configuration can be parsed).
+
+Several variables are created in the main namespace:
+	game: the socket connecting to the game server
+	name: the username of this connection
+	Public: a dict which is synchronised the the public game data
+	Private: a dict which is synchronised the the private game data
+
+The main program must contain a class named AI. An instance is created after a
+connection is made. It may define any of the following member functions:
+	new_game(): called when a new game is joined.
+	update(): called after any update is handled.
+	Public_update(changes): called after an update to Public is handled. changes is a dict with the old values of changed elements.
+	Private_update(changes): called after an update to Private is handled. changes is a dict with the old values of changed elements.
+	end(arg): called when the game ends. The argument is what the server returned.
+
+Any game-specific calls from the server are passed unchanged to the main AI class.
+'''
+
 import websocketd
 import __main__
 import fhs
@@ -11,13 +34,13 @@ undefined = Undefined()
 
 class AI:
 	def __init__(self, socket):
-		self._user = __main__.AI()
 		__main__.game = socket
-		__main__.Public = {}
-		__main__.Private = {}
 		self._connected = False
 	def name(self, name):
+		__main__.Public = {}
+		__main__.Private = {}
 		__main__.name = name
+		self._user = __main__.AI()
 	def _make_changes(self, obj, value, changes, path):
 		#websocketd.log('make changes at path {}, set {} to {}'.format(path, obj, value))
 		if not isinstance(value, (dict, list)):
@@ -106,7 +129,7 @@ class AI:
 				elif not hasattr(self._user, 'update'):
 					websocketd.log('No new_game or update defined')
 				if len(__main__.Private) > 0 and hasattr(self._user, 'Private_update'):
-					self._user.Private_update(__main__.Private)
+					self._user.Private_update({})
 				elif hasattr(self._user, 'update'):
 					self._user.update()
 			elif hasattr(self._user, 'Public_update'):

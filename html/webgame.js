@@ -1,18 +1,160 @@
 // vim: set foldmethod=marker :
-// Global variables. {{{
-var _body, _state, Public, Private, _titlescreen, title_select, _title_title, _mainscreen, _footer, _title_selection, _canvas;
-var _gametitle;
-var title_gamelist = [];
-var serverobj, server;
-var _audio, audio;
+
+// Functions and variables which can be replaced by user code. {{{
+
 var use_3d;
 var mouse_navigation = true;
-var my_name = null;
+var viewport = [-20, -15, 20, 15];	// Initial camera viewport.
+
+function playercolor(num) { // {{{
+	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
+	num %= colors.length;
+	return colors[num];
+} // }}}
+
+function title_make_option(select, name, n) { // {{{
+	var ret = Create('option').AddText(name);
+	ret.value = name;
+	if (n >= select.options.length) {
+		select.appendChild(ret);
+	}
+	else {
+		select.insertBefore(ret, select.options[n]);
+	}
+	return ret;
+} // }}}
+
+// }}}
+
+// Functions and variables which can be used by user code. {{{
+
+var Public, Private;	// Shared data.
+var title_gamelist = [];	// Games which are available in the title screen.
+var title_select;	// Select element on title screen (for changing style).
+var serverobj, server;	// Remote server connection and proxy object. Note that using the proxy object does not work in all browsers.
+var audio;	// Object with all registered audio files as its members.
+var my_name = null;	// Player name, as returned by the server.
+
+function watch(path, cb) { // {{{
+	if (path[0] != 'Public' && path[0] != 'Private')
+		console.error('Ignoring invalid watch path, must start with Public or Private', path);
+	else
+		_watchlist.push([path, cb]);
+} // }}}
+
+function new_canvas(w, h, redraw) { // {{{
+	var div = please.overlay.new_element();
+	var node = new please.GraphNode();
+	node.div = div;
+	graph.add(node);
+	div.bind_to_node(node);
+	node.canvas = div.AddElement('canvas');
+	node.canvas.redraw_func = function() {
+		node.canvas.width = w * 2 * window.camera.orthographic_grid;
+		node.canvas.height = h * 2 * window.camera.orthographic_grid;
+		div.style.width = node.canvas.style.width = node.canvas.width / 2 + 'px';
+		div.style.height = node.canvas.style.heigth = node.canvas.height / 2 + 'px';
+		node.context = node.canvas.getContext('2d');
+		node.context.scale(window.camera.orthographic_grid * 2, -window.camera.orthographic_grid * 2);
+		node.context.translate(w / 2, -h / 2);
+		if (redraw)
+			redraw(node);
+	};
+	_canvas_list.push(node.canvas);
+	node.canvas.AddEvent('click', function(event) {
+		if (!node.selectable)
+			return;
+		event.world_location = please.dom.pos_from_event(event.pageX, event.pageY, node.location_z);
+		// FIXME: this should take rotation and scale into account.
+		event.local_location = [event.world_location[0] - node.location_x, event.world_location[1] - node.location_y, 0];
+		node.dispatch('click', event);
+	});
+	node.canvas.redraw_func();
+	return node;
+} // }}}
+
+function del_canvas(node) { // {{{
+	_canvas_list.splice(_canvas_list.indexOf(node.canvas), 1);
+	graph.remove(node);
+	please.overlay.remove_element(node.div);
+} // }}}
+
+function new_div(w, h, pw, ph, redraw) { // {{{
+	var div = please.overlay.new_element();
+	var node = new please.GraphNode();
+	node.div = div;
+	graph.add(node);
+	div.bind_to_node(node);
+	div.style.width = pw + 'px';
+	div.style.height = ph + 'px';
+	div.redraw_func = function() {
+		div.style.transformOrigin = 'top left';
+		div.style.transform = 'scale(' + w * window.camera.orthographic_grid / pw + ',' + h * window.camera.orthographic_grid / ph + ')';
+		if (redraw)
+			redraw(node);
+	};
+	_div_list.push(div);
+	div.AddEvent('click', function(event) {
+		if (!node.selectable)
+			return;
+		node.dispatch('click', event);
+	});
+	div.redraw_func();
+	return node;
+} // }}}
+
+function del_div(node) { // {{{
+	_div_list.splice(_div_list.indexOf(node.div), 1);
+	graph.remove(node);
+	please.overlay.remove_element(node.div);
+} // }}}
+
+function pos_from_event(event) { // {{{
+	var pos = please.dom.pos_from_event(event.clientX, event.clientY);
+	return [pos[0] + camera.location_x, pos[1] + camera.location_y];
+} // }}}
+
+// }}}
+
+// Internal variables and functions. {{{
+
+// Global variables. {{{
+var _body, _state, _titlescreen, _title_title, _mainscreen, _footer, _title_selection, _canvas;
+var _gametitle;
+var _audio;
 var _players = [], _playerdiv;
-var viewport = [-20, -15, 20, 15];
+var _watchlist = [];
+var _canvas_list = [];
+var _div_list = [];
 // }}}
 
 AddEvent('load', function () { // {{{
+	var messages = {
+		webgame_init: _webgame_init,
+		Public_update: _Public_update,
+		Private_update: _Private_update,
+		'': function() {
+			var name = arguments[0];
+			var args = [];
+			for (var a = 1; a < arguments.length; ++a)
+				args.push(arguments[a]);
+			window[name].apply(window, args);
+		}
+	};
+	serverobj = Rpc(messages,
+		function() { _body.RemoveClass('disconnected'); },
+		function() { _body.AddClass('disconnected'); });
+	try {
+		server = serverobj.proxy;
+	}
+	catch(...) {
+		server = null;
+	}
+} // }}}
+
+function _webgame_init(name) { // {{{
+	my_name = name;
+	document.getElementById('title_game_name').value = my_name;
 	_gametitle = document.title;
 	_titlescreen = document.getElementById('title');
 	_mainscreen = document.getElementById('notitle');
@@ -24,6 +166,8 @@ AddEvent('load', function () { // {{{
 	_canvas = document.getElementById('canvas');
 	Public = { state: '', name: '' };
 	Private = { state: '' };
+	_makestate();
+	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
 #USE3D#
 	if (use_3d)
 		please.gl.set_context('canvas');
@@ -35,6 +179,7 @@ AddEvent('load', function () { // {{{
 	please.set_search_path('audio', 'audio');
 	please.set_search_path('glsl', 'glsl');
 	please.set_search_path('text', 'text');
+	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
 #LOAD#
 }); // }}}
 
@@ -150,33 +295,13 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 			}
 		}
 	}
+	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
 	var audio_data = (#AUDIO#);
 	for (var s = 0; s < audio_data.length; ++s)
 		make_play(audio_data[s]);
 
 	_body = document.getElementsByTagName('body')[0];
 	_state = document.getElementById('state');
-	var messages = {
-		win: function(code) { if (window.win !== undefined) window.win(code); },
-		Public_update: _Public_update,
-		Private_update: _Private_update,
-		name: function(n) {
-			my_name = n;
-			document.getElementById('title_game_name').value = my_name;
-			_makestate();
-		},
-		'': function() {
-			var name = arguments[0];
-			var args = [];
-			for (var a = 1; a < arguments.length; ++a)
-				args.push(arguments[a]);
-			window[name].apply(window, args);
-		}
-	};
-	serverobj = Rpc(messages,
-		function() { _body.RemoveClass('disconnected'); },
-		function() { _body.AddClass('disconnected'); });
-	server = serverobj.proxy;
 	window.AddEvent('resize', _resize_window);
 	if (!use_3d && window.init_2d !== undefined) window.init_2d();
 	if (use_3d && window.init_3d !== undefined) window.init_3d();
@@ -188,200 +313,22 @@ AddEvent('mgrl_dom_context_changed', function () { // {{{
 		window.update_canvas(please.dom.context);
 }); // }}}
 
-function playercolor(num) { // {{{
-	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
-	num %= colors.length;
-	return colors[num];
-} // }}}
-
-function _make_changes(target, value, changes, path) { // {{{
-	// Target is the old object
-	// Value is the new value
-	// Changes is the object that should be filled with changed values
-	// Path is the path in changes, which may not exist yet
-	//console.info('changes target', target, 'value', value, 'changes', changes, 'path', path);
-	if (!(value instanceof Object)) {
-		c = changes;
-		for (var i = 0; i < path.length - 1; ++i) {
-			if (c[path[i]] === undefined)
-				c[path[i]] = {};
-			c = c[path[i]];
-		}
-		c[path[path.length - 1]] = target;
-		return;
-	}
-	var obj = target ? target[path[path.length - 1]] : undefined;
-	for (var i in value) {
-		path.push(i);
-		_make_changes(obj ? obj[i] : undefined, value[i], changes, path);
-		path.pop();
-	}
-	if (obj instanceof Object) {
-		for (var v in obj) {
-			if (value !== undefined && value[v] !== undefined)
-				continue;
-			path.push(v);
-			_make_changes(obj[v], undefined, changes, path);
-			path.pop();
-		}
-	}
-	//console.info('result', changes);
-} // }}}
-
-function _update(obj, path, value) { // {{{
-	var changes;
-	//console.info('update', obj[0], 'path', path, 'value', value);
-	var target = obj[0];
-	for (var i = 0; i < path.length - 1; ++i)
-		target = target[path[i]];
-	if (path.length > 0) {
-		changes = {};
-		_make_changes(target, value, changes, path);
-		target[path[path.length - 1]] = value;
-	}
-	else if (obj[0] === Public) {
-		changes = Public;
-		Public = value;
-	}
-	else if (obj[0] === Private) {
-		changes = Private;
-		Private = value;
-	}
-	else
-		console.error('BUG: invalid object for update', obj[0]);
-	//console.info('*************', changes);
-	return changes;
-} // }}}
-
-function _Public_update(path, value) { // {{{
-	//console.info('update', path, value);
-	var changes = _update([Public], path, value);
-	_makestate();
-	if (Public.name == '') {
-		document.title = _gametitle;
-		// Set number of players for new games.
-		if (Public.min_players == Public.max_players) {
-			document.getElementById('numplayers').AddClass('hidden');
-			document.getElementById('title_num_players').value = Public.max_players;
-		}
-		else {
-			document.getElementById('numplayers').RemoveClass('hidden');
-			if (Public.max_players === null)
-				document.getElementById('range').ClearAll().AddText('(' + Public.max_players + ' or more)');
-			else
-				document.getElementById('range').ClearAll().AddText('(' + Public.min_players + ' - ' + Public.max_players + ')');
-		}
-		// Show title screen.
-		_title_title.ClearAll().AddText(Public.title);
-		var games = Public.games || [];
-		// Remove titles that aren't in the list.
-		var new_list = [];
-		for (var g = 0; g < title_gamelist.length; ++g) {
-			for (var n = 0; n < games.length; ++n) {
-				if (games[n] == title_gamelist[g][0]) {
-					new_list.push(title_gamelist[g]);
-					break;
-				}
-			}
-		}
-		// Add titles that are in the list and remove the old ones from the Select element.
-		var current = 0;
-		title_gamelist = [];
-		for (var n = 0; n < games.length; ++n) {
-			while (current < new_list.length && n < title_select.options.length && new_list[current][0] != title_select.options[n].value)
-				title_select.removeChild(title_select.options[n]);
-			if (current < new_list.length && games[n] == new_list[current][0]) {
-				title_gamelist.push(new_list[current]);
-				continue;
-			}
-			title_gamelist.push([games[n], title_make_option(title_select, games[n], n)]);
-		}
-		while (title_select.options.length > n)
-			title_select.removeChild(title_select.options[n]);
-		if (title_gamelist.length == 0)
-			_title_selection.AddClass('hidden');
-		else
-			_title_selection.RemoveClass('hidden');
-		// Show the titlescreen.
-		_titlescreen.RemoveClass('hidden');
-		_mainscreen.AddClass('hidden');
-		_footer.AddClass('hidden');
-		please.renderer.overlay.AddClass('hidden');
-		if (window.title_Public_update !== undefined)
-			window.title_Public_update(changes);
-		if (window.title_update !== undefined)
-			window.title_update();
-		return;
-	}
-	if (changes['name'] == '') {
-		// Hide the titlescreen.
-		_titlescreen.AddClass('hidden');
-		_mainscreen.RemoveClass('hidden');
-		_footer.RemoveClass('hidden');
-		please.renderer.overlay.RemoveClass('hidden');
-		document.title = _gametitle + ' - ' + Public.name;
-		_resize_window();
-		if (window.update_canvas && !use_3d)
-			window.update_canvas(please.dom.context);
-		if (window.new_game)
-			window.new_game();
-		if (window.Private_update !== undefined)
-			window.Private_update(Private);
-		else if (window.update !== undefined)
-			window.update();
-	}
-	else {
-		if (window.Public_update !== undefined)
-			window.Public_update(changes);
-		else if (window.update !== undefined)
-			window.update();
-	}
-} // }}}
-
-function title_make_option(select, name, n) { // {{{
-	var ret = Create('option').AddText(name);
-	ret.value = name;
-	if (n >= select.options.length) {
-		select.appendChild(ret);
-	}
-	else {
-		select.insertBefore(ret, select.options[n]);
-	}
-	return ret;
-} // }}}
-
 function _title_join() { // {{{
 	var game = title_select.options[title_select.selectedIndex].value;
-	server.join(game);
+	serverobj.call('join', [game]);
 } // }}}
 
 function _title_view() { // {{{
 	var game = title_select.options[title_select.selectedIndex].value;
-	server.view(game);
+	serverobj.call('view', [game]);
 } // }}}
 
 function _title_new() { // {{{
-	server['new'](document.getElementById('title_game_name').value, Number(document.getElementById('title_num_players').value));
-} // }}}
-
-function _Private_update(path, value) { // {{{
-	var changes = _update([Private], path, value);
-	_makestate();
-	if (Public.name == '') {
-		if (window.title_Private_update !== undefined)
-			window.title_Private_update();
-		if (window.title_update !== undefined)
-			window.title_update();
-		return;
-	}
-	if (window.Private_update !== undefined)
-		window.Private_update(changes);
-	else if (window.update !== undefined)
-		window.update();
+	serverobj.call('new', [document.getElementById('title_game_name').value, Number(document.getElementById('title_num_players').value)]);
 } // }}}
 
 function _leave() { // {{{
-	server.leave();
+	serverobj.call('leave', []);
 } // }}}
 
 function _makestate() { // {{{
@@ -403,76 +350,6 @@ function _makestate() { // {{{
 				_players[p][0].RemoveClass('self');
 		}
 	}
-} // }}}
-
-var _canvas_list = [];
-var _div_list = [];
-
-function new_canvas(w, h, redraw) { // {{{
-	var div = please.overlay.new_element();
-	var node = new please.GraphNode();
-	node.div = div;
-	graph.add(node);
-	div.bind_to_node(node);
-	node.canvas = div.AddElement('canvas');
-	node.canvas.redraw_func = function() {
-		node.canvas.width = w * 2 * window.camera.orthographic_grid;
-		node.canvas.height = h * 2 * window.camera.orthographic_grid;
-		div.style.width = node.canvas.style.width = node.canvas.width / 2 + 'px';
-		div.style.height = node.canvas.style.heigth = node.canvas.height / 2 + 'px';
-		node.context = node.canvas.getContext('2d');
-		node.context.scale(window.camera.orthographic_grid * 2, -window.camera.orthographic_grid * 2);
-		node.context.translate(w / 2, -h / 2);
-		if (redraw)
-			redraw(node);
-	};
-	_canvas_list.push(node.canvas);
-	node.canvas.AddEvent('click', function(event) {
-		if (!node.selectable)
-			return;
-		event.world_location = please.dom.pos_from_event(event.pageX, event.pageY, node.location_z);
-		// FIXME: this should take rotation and scale into account.
-		event.local_location = [event.world_location[0] - node.location_x, event.world_location[1] - node.location_y, 0];
-		node.dispatch('click', event);
-	});
-	node.canvas.redraw_func();
-	return node;
-} // }}}
-
-function del_canvas(node) { // {{{
-	_canvas_list.splice(_canvas_list.indexOf(node.canvas), 1);
-	graph.remove(node);
-	please.overlay.remove_element(node.div);
-} // }}}
-
-function new_div(w, h, pw, ph, redraw) { // {{{
-	var div = please.overlay.new_element();
-	var node = new please.GraphNode();
-	node.div = div;
-	graph.add(node);
-	div.bind_to_node(node);
-	div.style.width = pw + 'px';
-	div.style.height = ph + 'px';
-	div.redraw_func = function() {
-		div.style.transformOrigin = 'top left';
-		div.style.transform = 'scale(' + w * window.camera.orthographic_grid / pw + ',' + h * window.camera.orthographic_grid / ph + ')';
-		if (redraw)
-			redraw(node);
-	};
-	_div_list.push(div);
-	div.AddEvent('click', function(event) {
-		if (!node.selectable)
-			return;
-		node.dispatch('click', event);
-	});
-	div.redraw_func();
-	return node;
-} // }}}
-
-function del_div(node) { // {{{
-	_div_list.splice(_div_list.indexOf(node.div), 1);
-	graph.remove(node);
-	please.overlay.remove_element(node.div);
 } // }}}
 
 function _resize_window() { // {{{
@@ -533,7 +410,143 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 		window.update_canvas(please.dom.context);
 }); // }}}
 
-function pos_from_event(event) { // {{{
-	var pos = please.dom.pos_from_event(event.clientX, event.clientY);
-	return [pos[0] + camera.location_x, pos[1] + camera.location_y];
+function _update(is_public, path, value) { // {{{
+	//console.info('update', obj[0], 'path', path, 'value', value);
+	var top = (is_public ? Public : Private);
+	// Find watched items.
+	var watch = [];
+	outer: for (var w = 0; w < _watchlist.length; ++w) {
+		var p = _watchlist[w][0];
+		if ((p[0] == 'Public') ^ is_public)
+			continue;
+		for (var i = 0; i < path.length; ++i) {
+			if (p[i + 1] != path[i])
+				continue outer;
+		}
+		// Get current value.
+		var target = top;
+		for (var i = 0; i < p.length - 1; ++i) {
+			target = target[p[i]];
+			if (target === undefined)
+				break;
+		}
+		watch.push(p, _watchlist[w][1], target);
+	}
+	// Update the data.
+	var target = top;
+	for (var i = 0; i < path.length - 1; ++i)
+		target = target[path[i]];
+	if (path.length > 0)
+		target[path[path.length - 1]] = value;
+	else if (obj[0] === Public)
+		Public = value;
+	else if (obj[0] === Private)
+		Private = value;
+	else
+		console.error('BUG: invalid object for update', obj[0]);
+	// Fire watch events.
+	for (var w = 0; w < watch.length; ++w) {
+		p = watch[w][0];
+		cb = watch[w][1];
+		old = watch[w][2];
+		var target = top;
+		for (var i = 0; i < p.length - 1; ++i) {
+			target = target[p[i]];
+			if (target === undefined)
+				break;
+		}
+		if (old != target)
+			cb(target, old);
+	}
 } // }}}
+
+function _Public_update(path, value) { // {{{
+	//console.info('update', path, value);
+	var oldname = Public.name;
+	_update(true, path, value);
+	_makestate();
+	if (Public.name == '') {
+		// Title screen.
+		document.title = _gametitle;
+		// Set number of players for new games.
+		if (Public.min_players == Public.max_players) {
+			document.getElementById('numplayers').AddClass('hidden');
+			document.getElementById('title_num_players').value = Public.max_players;
+		}
+		else {
+			document.getElementById('numplayers').RemoveClass('hidden');
+			if (Public.max_players === null)
+				document.getElementById('range').ClearAll().AddText('(' + Public.max_players + ' or more)');
+			else
+				document.getElementById('range').ClearAll().AddText('(' + Public.min_players + ' - ' + Public.max_players + ')');
+		}
+		// Show title screen.
+		_title_title.ClearAll().AddText(Public.title);
+		var games = Public.games || [];
+		// Remove titles that aren't in the list.
+		var new_list = [];
+		for (var g = 0; g < title_gamelist.length; ++g) {
+			for (var n = 0; n < games.length; ++n) {
+				if (games[n] == title_gamelist[g][0]) {
+					new_list.push(title_gamelist[g]);
+					break;
+				}
+			}
+		}
+		// Add titles that are in the list and remove the old ones from the Select element.
+		var current = 0;
+		title_gamelist = [];
+		for (var n = 0; n < games.length; ++n) {
+			while (current < new_list.length && n < title_select.options.length && new_list[current][0] != title_select.options[n].value)
+				title_select.removeChild(title_select.options[n]);
+			if (current < new_list.length && games[n] == new_list[current][0]) {
+				title_gamelist.push(new_list[current]);
+				continue;
+			}
+			title_gamelist.push([games[n], title_make_option(title_select, games[n], n)]);
+		}
+		while (title_select.options.length > n)
+			title_select.removeChild(title_select.options[n]);
+		if (title_gamelist.length == 0)
+			_title_selection.AddClass('hidden');
+		else
+			_title_selection.RemoveClass('hidden');
+		// Show the titlescreen.
+		_titlescreen.RemoveClass('hidden');
+		_mainscreen.AddClass('hidden');
+		_footer.AddClass('hidden');
+		please.renderer.overlay.AddClass('hidden');
+		if (window.title_update !== undefined)
+			window.title_update();
+		return;
+	}
+	if (oldname == '') {
+		// Hide the titlescreen.
+		_titlescreen.AddClass('hidden');
+		_mainscreen.RemoveClass('hidden');
+		_footer.RemoveClass('hidden');
+		please.renderer.overlay.RemoveClass('hidden');
+		document.title = _gametitle + ' - ' + Public.name;
+		_resize_window();
+		if (window.update_canvas && !use_3d)
+			window.update_canvas(please.dom.context);
+		if (window.new_game)
+			window.new_game();
+	}
+	if (window.update !== undefined)
+		window.update();
+} // }}}
+
+function _Private_update(path, value) { // {{{
+	_update(false, path, value);
+	_makestate();
+	if (Public.name == '') {
+		if (window.title_update !== undefined)
+			window.title_update();
+		return;
+	}
+	if (window.update !== undefined)
+		window.update();
+} // }}}
+
+// }}}
