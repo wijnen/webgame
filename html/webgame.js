@@ -34,19 +34,107 @@ var title_select;	// Select element on title screen (for changing style).
 var serverobj, server;	// Remote server connection and proxy object. Note that using the proxy object does not work in all browsers.
 var audio;	// Object with all registered audio files as its members.
 var my_name = null;	// Player name, as returned by the server.
+var my_num = null;	// Player number of me, or null if not playing.
+
+function _(message) {	// Support for translations. {{{
+	if (_translations !== undefined && _translations[_language] !== undefined && _translations[_language][message] !== undefined)
+		message = _translations[_language][message];
+	var parts = [''];
+	var substs = [];
+	while (message.length > 0) {
+		var pos = message.search('\\$');
+		if (pos == -1)
+			break;
+		parts[parts.length - 1] += message.substr(0, pos);
+		var code = message[pos + 1];
+		message = message.substr(pos + 2);
+		if (code == '$')
+			continue;
+		substs.push(Number(code));
+		parts.push('');
+	}
+	parts[parts.length - 1] += message;
+	if (parts.length == 1)
+		return parts[0];
+	return function() {
+		var ret = parts[0];
+		for (var i = 0; i < substs.length; ++i) {
+			if (substs[i] > 0)
+				ret += String(arguments[substs[i] - 1]);
+			else {
+				var args = [];
+				for (var j = 0; j < arguments.length; ++j)
+					args.push(arguments[j]);
+				ret += args;
+			}
+			ret += parts[i + 1];
+		}
+		return ret;
+	};
+} // }}}
 
 function watch(path, cb) { // {{{
 	if (path[0] != 'Public' && path[0] != 'Private')
-		console.error('Ignoring invalid watch path, must start with Public or Private', path);
+		console.error(_('Ignoring invalid watch path $1, must start with Public or Private')(path));
 	else
 		_watchlist.push([path, cb]);
 } // }}}
 
-function new_canvas(w, h, redraw) { // {{{
+function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
+	// Call add for initial attributes.
+	var target = (path[0] == 'Public' ? Public : Private);
+	for (var i = 1; i < path.length; ++i) {
+		target = target[path[i]];
+		if (target === undefined)
+			break;
+	}
+	if (add_cb && (typeof target == 'object' && target !== null)) {
+		for (var attr in target)
+			add_cb(attr, target[attr]);
+	}
+	// Watch changes.
+	watch(path, function(value, old) {
+		if (typeof value != 'object' || value === null) {
+			// Not an object. If old is, call remove for all members.
+			if (remove_cb && (typeof old == 'object' || old === null)) {
+				for (var attr in old)
+					remove_cb(attr, old[attr]);
+			}
+			return;
+		}
+		if (typeof old != 'object' || old === null) {
+			// It wasn't an object. Call add for all members.
+			if (add_cb) {
+				for (var attr in value)
+					add_cb(attr, value[attr]);
+			}
+			return;
+		}
+		// Both value and old are objects. Find changes.
+		if (remove_cb) {
+			for (var attr in old) {
+				if (value[attr] === undefined)
+					remove_cb(attr, old[attr]);
+			}
+		}
+		for (var attr in value) {
+			if (old[attr] === undefined) {
+				if (add_cb)
+					add_cb(attr, value[attr]);
+			}
+			else if (value[attr] != old[attr]) {
+				if (change_cb)
+					change_cb(attr, value[attr], old[attr]);
+			}
+		}
+	});
+} // }}}
+
+function new_canvas(w, h, redraw, parent) { // {{{
 	var div = please.overlay.new_element();
 	var node = new please.GraphNode();
 	node.div = div;
-	graph.add(node);
+	(parent ? parent : graph).add(node);
 	div.bind_to_node(node);
 	node.canvas = div.AddElement('canvas');
 	node.canvas.redraw_func = function() {
@@ -79,11 +167,11 @@ function del_canvas(node) { // {{{
 	please.overlay.remove_element(node.div);
 } // }}}
 
-function new_div(w, h, pw, ph, redraw) { // {{{
+function new_div(w, h, pw, ph, redraw, parent) { // {{{
 	var div = please.overlay.new_element();
 	var node = new please.GraphNode();
 	node.div = div;
-	graph.add(node);
+	(parent ? parent : graph).add(node);
 	div.bind_to_node(node);
 	div.style.width = pw + 'px';
 	div.style.height = ph + 'px';
@@ -114,6 +202,28 @@ function pos_from_event(event) { // {{{
 	return [pos[0] + camera.location_x, pos[1] + camera.location_y];
 } // }}}
 
+function edit_texture(instance, tname, editor) { // {{{
+	if (please.media.assets[tname] === undefined) {
+		var img = please.media.assets[instance.shader.diffuse_texture];
+		var canvas = Create('canvas');
+		canvas.width = img.width;
+		canvas.height = img.height;
+		var ctx = canvas.getContext('2d');
+		ctx.drawImage(img, 0, 0);
+		editor(ctx);
+		please.media.assets[tname] = canvas;
+	}
+	instance.shader.diffuse_texture = tname;
+} // }}}
+
+function player_texture(instance, num) { // {{{
+	edit_texture(instance, 'texture-player-' + num + '-' + instance.shader.diffuse_texture, function(ctx) {
+		ctx.fillStyle = playercolor(num);
+		ctx.fillRect(0, 0, 1, 1);
+	});
+	return instance;
+} // }}}
+
 // }}}
 
 // Internal variables and functions. {{{
@@ -126,9 +236,31 @@ var _players = [], _playerdiv;
 var _watchlist = [];
 var _canvas_list = [];
 var _div_list = [];
+var _translations = {};
+var _languages, _language;
 // }}}
 
-AddEvent('load', function () { // {{{
+function _set_language(language) { // {{{
+	if (_translations[language] === undefined) {
+		console.error(_('Attempting to set undefined language $1')(language));
+		return;
+	}
+	_language = language;
+	for (var e in _translatable)
+		_translatable[e].ClearAll().AddText(_(e));
+} // }}}
+
+AddEvent('load', function() { // {{{
+	_body = document.getElementsByTagName('body')[0];
+	_state = document.getElementById('state');
+	// Set up translations.
+	_translatable = {};
+	var elements = document.getElementsByClassName('translate');
+	for (var e = 0; e < elements.length; ++e)
+		_translatable[elements[e].textContent] = elements[e];
+	Public = { state: '', name: '' };
+	Private = { state: '' };
+	_makestate();
 	var messages = {
 		webgame_init: _webgame_init,
 		Public_update: _Public_update,
@@ -147,13 +279,14 @@ AddEvent('load', function () { // {{{
 	try {
 		server = serverobj.proxy;
 	}
-	catch(...) {
+	catch (e) {
 		server = null;
 	}
-} // }}}
+}); // }}}
 
 function _webgame_init(name) { // {{{
 	my_name = name;
+	my_num = null;
 	document.getElementById('title_game_name').value = my_name;
 	_gametitle = document.title;
 	_titlescreen = document.getElementById('title');
@@ -164,9 +297,6 @@ function _webgame_init(name) { // {{{
 	title_select = document.getElementById('title_games');
 	_playerdiv = document.getElementById('players');
 	_canvas = document.getElementById('canvas');
-	Public = { state: '', name: '' };
-	Private = { state: '' };
-	_makestate();
 	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
 #USE3D#
 	if (use_3d)
@@ -181,9 +311,9 @@ function _webgame_init(name) { // {{{
 	please.set_search_path('text', 'text');
 	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
 #LOAD#
-}); // }}}
+} // }}}
 
-AddEvent('mgrl_media_ready', please.once(function () { // {{{
+AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	window.graph = new please.SceneGraph();
 	window.camera = new please.CameraNode();
 	graph.add(camera);
@@ -248,7 +378,7 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 						return min;
 					}
 					return val;
-				}
+				};
 				if (event.shiftKey) {
 					var dx = (diff[1] * Math.cos(please.radians(theta)) - diff[0] * Math.sin(please.radians(theta))) / -500 * r;
 					var dy = (diff[0] * Math.cos(please.radians(theta)) + diff[1] * Math.sin(please.radians(theta))) / -500 * r;
@@ -260,10 +390,10 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 				}
 			});
 			window.AddEvent('mousewheel', function(event) {
-				r += event.detail;
+				r += event.detail / (event.shiftKey ? 10 : 1);
 			});
 			window.AddEvent('DOMMouseScroll', function(event) {
-				r += event.detail;
+				r += event.detail / (event.shiftKey ? 10 : 1);
 			});
 		}
 		please.set_viewport(renderer);
@@ -279,7 +409,7 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 	audio = {};
 	var make_play = function(target) {
 		var name = '';
-		obj = audio;
+		var obj = audio;
 		for (var i = 0; i < target[0].length; ++i) {
 			name += target[0][i] + '/';
 			if (obj[target[0][i]] === undefined)
@@ -293,22 +423,20 @@ AddEvent('mgrl_media_ready', please.once(function () { // {{{
 				_audio[name + target[2]].fastSeek(0);
 				_audio[name + target[2]].play();
 			}
-		}
-	}
+		};
+	};
 	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
 	var audio_data = (#AUDIO#);
 	for (var s = 0; s < audio_data.length; ++s)
 		make_play(audio_data[s]);
 
-	_body = document.getElementsByTagName('body')[0];
-	_state = document.getElementById('state');
 	window.AddEvent('resize', _resize_window);
 	if (!use_3d && window.init_2d !== undefined) window.init_2d();
 	if (use_3d && window.init_3d !== undefined) window.init_3d();
 	if (window.init !== undefined) window.init();
 })); // }}}
 
-AddEvent('mgrl_dom_context_changed', function () { // {{{
+AddEvent('mgrl_dom_context_changed', function() { // {{{
 	if (window.update_canvas && !use_3d)
 		window.update_canvas(please.dom.context);
 }); // }}}
@@ -339,6 +467,7 @@ function _makestate() { // {{{
 		_playerdiv.removeChild(_players.pop()[0]);
 	while (_players.length < Public.players.length)
 		_players.push([_playerdiv.AddElement('span', 'player'), null]);
+	my_num = null;
 	for (var p = 0; p < _players.length; ++p) {
 		if (_players[p][1] != Public.players[p].name) {
 			_players[p][1] = Public.players[p].name;
@@ -349,6 +478,8 @@ function _makestate() { // {{{
 			else
 				_players[p][0].RemoveClass('self');
 		}
+		if (my_name == _players[p][1])
+			my_num = p;
 	}
 } // }}}
 
@@ -390,7 +521,7 @@ function _resize_window() { // {{{
 	please.__align_canvas_overlay();
 } // }}}
 
-window.AddEvent('mgrl_overlay_aligned', function () { // {{{
+window.AddEvent('mgrl_overlay_aligned', function() { // {{{
 	for (var c = 0; c < _canvas_list.length; ++c)
 		_canvas_list[c].redraw_func();
 	for (var d = 0; d < _div_list.length; ++d)
@@ -411,52 +542,52 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 }); // }}}
 
 function _update(is_public, path, value) { // {{{
-	//console.info('update', obj[0], 'path', path, 'value', value);
 	var top = (is_public ? Public : Private);
 	// Find watched items.
 	var watch = [];
 	outer: for (var w = 0; w < _watchlist.length; ++w) {
-		var p = _watchlist[w][0];
-		if ((p[0] == 'Public') ^ is_public)
+		var watch_path = _watchlist[w][0];
+		if ((watch_path[0] == 'Public') ^ is_public) {
 			continue;
-		for (var i = 0; i < path.length; ++i) {
-			if (p[i + 1] != path[i])
+		}
+		for (var i = 0; i < path.length && i < watch_path.length - 1; ++i) {
+			if (watch_path[i + 1] != path[i]) {
 				continue outer;
+			}
 		}
 		// Get current value.
 		var target = top;
-		for (var i = 0; i < p.length - 1; ++i) {
-			target = target[p[i]];
+		for (var i = 1; i < watch_path.length; ++i) {
+			target = target[watch_path[i]];
 			if (target === undefined)
 				break;
 		}
-		watch.push(p, _watchlist[w][1], target);
+		watch.push([watch_path, _watchlist[w][1], _deepcopy(target)]);
 	}
 	// Update the data.
-	var target = top;
-	for (var i = 0; i < path.length - 1; ++i)
-		target = target[path[i]];
-	if (path.length > 0)
+	if (path.length > 0) {
+		var target = top;
+		for (var i = 0; i < path.length - 1; ++i)
+			target = target[path[i]];
 		target[path[path.length - 1]] = value;
-	else if (obj[0] === Public)
+	}
+	else if (is_public)
 		Public = value;
-	else if (obj[0] === Private)
-		Private = value;
 	else
-		console.error('BUG: invalid object for update', obj[0]);
+		Private = value;
 	// Fire watch events.
 	for (var w = 0; w < watch.length; ++w) {
 		p = watch[w][0];
 		cb = watch[w][1];
 		old = watch[w][2];
-		var target = top;
-		for (var i = 0; i < p.length - 1; ++i) {
+		var target = (is_public ? Public : Private);
+		for (var i = 1; i < p.length; ++i) {
 			target = target[p[i]];
 			if (target === undefined)
 				break;
 		}
 		if (old != target)
-			cb(target, old);
+			cb(target, old, p);
 	}
 } // }}}
 
@@ -547,6 +678,27 @@ function _Private_update(path, value) { // {{{
 	}
 	if (window.update !== undefined)
 		window.update();
+} // }}}
+
+function _deepcopy(obj) { // {{{
+	if (typeof obj != 'object' || obj === null)
+		return obj;
+	if (obj.constructor === [].constructor) {
+		var ret = [];
+		for (var i = 0; i < obj.length; ++i)
+			ret[i] = _deepcopy(obj[i]);
+		return ret;
+	}
+	else if (obj.constructor === {}.constructor) {
+		var ret = {};
+		for (var i in obj)
+			ret[i] = _deepcopy(obj[i]);
+		return ret;
+	}
+	else {
+		console.error('unrecognized object', obj);
+		return obj;
+	}
 } // }}}
 
 // }}}

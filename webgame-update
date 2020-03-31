@@ -1,0 +1,47 @@
+#!/usr/bin/python3
+
+'''Update a client directory of a webgame.
+Always:
+	Update all existing translations
+
+With argument(s):
+	Create po files for languages that are specified (for client and js).
+
+See header of update-pot for explanation of structure.
+'''
+
+import fhs
+import sys
+import subprocess
+
+fhs.option('name', 'game name')
+config = fhs.init(help = 'Update or install translation files for a webgame', version = '0.1', contact = 'Bas Wijnen <wijnen@debian.org>', game = True)
+
+def run(cmd, input = None):
+	if input is None:
+		return subprocess.run(cmd, shell = True, close_fds = True, stdout = subprocess.PIPE).stdout
+	else:
+		return subprocess.run(cmd, shell = True, close_fds = True, input = input, stdout = subprocess.PIPE).stdout
+
+pot = {}
+# Create pot into a variable.
+gpyfiles = [x for x in os.listdir('.') if x.endswith('.gpy')]
+files = [x for x in os.listdir('.') if x.endswith('.py') or x == 'ai']
+if len(files) > 0:
+	pot['po'] = run('xgettext -L Python ' + ' '.join(gpyfiles + files) + ' -o -')
+
+name = config['name'] or os.path.dirname(os.path.abspath(os.curdir)).capitalize()
+files = [x for x in os.listdir('.') if x.endswith('.js')]
+pot['po.js'] = run('xgettext -L JavaScript - ' + ' '.join(files) + ' -o -', 'console.info(_("' + name.replace('"', '\\"') + '"));')
+
+for type in ('po', 'po.js'):
+	# Run msgmerge for each translation
+	for f in os.listdir(type):
+		if not f.endswith('.po'):
+			continue
+		run('msgmerge -U %s -' % os.path.join(type, f), pot[type])
+	# Store pot for each argument, if it doesn't exist yet
+	for a in sys.argv[1:]:
+		f = os.path.join(type, a + '.po')
+		if not os.path.exists(f):
+			open(f, 'w').write(pot[type])

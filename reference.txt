@@ -1,0 +1,120 @@
+# Reference for webgame gpy files
+
+## Globals defined by game, used by the system:
+
+name: optional, str.
+	Game name. Defaults to program name.
+
+autokill: optional, bool.
+	If True, kill game when last connection is closed.
+
+num_players: required, int or tuple of two ints.
+	Number of players. If this is an int, the game requires exactly that
+	number. With two ints, those are minimum and maximum values. If the
+	maximum value is None, there is no upper limit.
+
+commands: optional, dict of str:callable.
+	Commands that can always be called remotely. The list initially
+	contains only "leave", which allows clients to exit the game and return
+	to the title "game". If specified, these commands are added to the
+	list. It is possible, but not recommended, to override the "leave"
+	command.
+
+Game: required, class with game rules definition.
+	Details below.
+
+Title: optional, class with title screen "game" rules definition.
+	Defaults to simple game starting server. Syntax is identical to that of
+	Game.
+
+
+# The Game class
+
+Properties that are injected into a Game class when it is created:
+
+launch(task: generator, name: str, run_now: bool)
+	launches a new task. If run_now is False (the default), it starts when
+	the program returns to the main loop. Otherwise it is started before
+	the call returns.
+	
+	Returns the new task.
+
+broadcast
+	calling a property of this will make a broadcast to all clients that
+	are in this Game instance.
+
+add_player()
+	Add a player to this game. It does not initially have a connection.
+	Returns the new player number.
+
+remove_player(p: int)
+	Remove a player from this game. Note that if removing anyone other than
+	the last player, this will renumber the existing players, which may not
+	work well.
+
+Public: Shared_Object
+	This object is shared with all game clients.
+	Initial properties:
+		name: str
+			the game name (this is the empty string for the title game)
+		players: list of dicts
+			contains public information about all players.
+			each dict contains a 'name':str item which is
+			maintained by the system.  The game can add more data.
+
+		For the title game only:
+		
+		games: list of str
+			list of all running games
+		title: str
+			the name of this game (not any instance)
+		min_players: int
+			the minimum number of players
+		max_players: int
+			the maximum number of players, or None if there is no limit.
+
+players: list of Player objects
+	server side player data
+	Player objects contain:
+		Private: Shared_Object
+			This object is shared with the controlling player
+			System-maintained properties:
+				actions: list of str
+					All actions that can currently be
+					invoked by this player, except actions
+					that are always allowed.
+
+now: int
+	current time, updated whenever a task is resumed.
+
+Properties that can be defined in the Game class that will be called:
+
+player_added(p: int)
+	Called after add_player is done creating a new player.
+
+player_removed(p: int)
+	Caled just before remove_player will remove a player.
+
+
+# Yield arguments
+
+yield is called with a dict, list, tuple, set, frozenset, int, float or str argument.
+If the argument is not a dict, it is converted into a dict as follows:
+
+If the argument is Task, int, float or str, it is changed into a list of one element.
+
+If the argument is not a dict, each element is inserted into the dict:
+
+If it is a str or Task, as value: None
+Otherwise, as None: value
+
+The dict can contain a None key, which must have a numerical value. This is the timeout (in seconds).
+Other keys should be str. Those are functions that can be called by remote clients.
+
+The value of an item with a str key is:
+- None: all clients can call the function.
+- int: only this client can call the function.
+- list, tuple, set or frozenset: only these clients can call the function.
+
+The value of an item with a Task key is irrelevant. The caller will be resumed
+when the referenced Task is finished. It's return value is passed to the send() call.

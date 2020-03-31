@@ -2,28 +2,36 @@
 <html>
 	<head>
 		<meta charset='utf-8'/>
-		<title>#NAME#</title>
+		<title class="translate">#NAME#</title>
 #BASE#		<script type='application/javascript' src='gl-matrix.js'></script>
 		<script type='application/javascript' src='mgrl.js'></script>
 		<script type='application/javascript' src='rpc.js'></script>
 		<script type='application/javascript' src='builders.js'></script>
 #SOURCE#
-		<link rel='stylesheet' href='webgame.css'/>
 	</head>
 	<body class='disconnected'>
 		<div id='title'>
 			<h1 id='game_title'></h1>
-			<p id='titleselection'>
-				<select id='title_games'></select>
-				<button type='button' onclick="_title_join()">Join</button>
-				<button type='button' onclick="_title_view()">Watch</button>
-			</p>
+			<div id='titleselection'>
+				<h2 class='translate'>Running Games</h2>
+				<p>
+					<select id='title_games'></select>
+					<button type='button' onclick="_title_join()" class='translate'>Join</button>
+					<button type='button' onclick="_title_view()" class='translate'>Watch</button>
+				</p>
+			</div>
+			<h2 class='translate'>Create New Game</h2>
 			<p>
-				<button type='button' onclick="_title_new()">Create new game</button>
-				Name:
+				<button type='button' onclick="_title_new()" class='translate'>Create new game</button>
+				<span class='translate'>Name:</span>
 				<input type='text' id='title_game_name'/>
-				<span id='numplayers'>Number of players: <input type='text' name='num_players' id='title_num_players'/><span id='range'></span></span>
+				<span id='numplayers'>
+					<span class='translate'>Number of players:</span>
+					<input type='text' name='num_players' id='title_num_players'/><span id='range'></span>
+				</span>
 			</p>
+			<h3 class='translate'>Note</h3>
+			<p class='translate'>You can change your name by adding "/?name=yourname" to the location bar.</p>
 		</div>
 		<div id='notitle' class='hidden'>
 			<canvas id='canvas' width='1200' height='600'></canvas>
@@ -31,7 +39,7 @@
 		</div>
 		<div id='footer'>
 			<span id='state'></span>
-			<button id='leave' type='button' onclick='_leave()'>Leave game</button>
+			<button id='leave' type='button' onclick='_leave()' class='translate'>Leave game</button>
 		</div>
 	</body>
 </html>

@@ -25,20 +25,60 @@ import websocketd
 import __main__
 import fhs
 
-fhs.module_init('game', {'name': 'ai', 'myname': 'ai'})
+fhs.module_info('webgame_client', 'client module for webgame games', '0.1', 'Bas Wijnen <wijnen@debian.org>')
+fhs.module_option('webgame_client', 'port', 'server name and port', default = '8891')
+fhs.module_option('webgame_client', 'name', 'player name', default = 'ai')
+fhs.module_option('webgame_client', 'game', 'game name to join', default = '')
 
 class Undefined:
 	def __bool__(self):
 		return False
 undefined = Undefined()
 
+def _is_shared(obj):
+	return isinstance(obj, (Shared_Array, Shared_Object))
+
+def _make_shared(obj):
+	if _is_shared(obj):
+		return obj
+	if isinstance(obj, list):
+		return Shared_Array(obj)
+	if isinstance(obj, dict):
+		return Shared_Object(obj)
+	return obj
+
+class Shared_Array(list):
+	'''Receiver of the server's shared data.'''
+	def __init__(self, base = None):
+		if base is not None:
+			self.extend((None,) * len(base))
+			for i, v in enumerate(base):
+				super().__setitem__(i, _make_shared(v))
+	def __setitem__(self, key, value):
+		assert isinstance(key, int)
+		super().__setitem__(key, _make_shared(value))
+
+class Shared_Object(dict):
+	'''Receiver of the server's shared data.
+	Members can be retrieved both as items and as attributes.'''
+	def __init__(self, base = None):
+		if base is not None:
+			for key in base:
+				self[key] = base[key]
+	def __getattr__(self, attr):
+		return self[attr]
+	def __setattr__(self, attr, value):
+		self[attr] = value
+	def __setitem__(self, key, value):
+		super().__setitem__(key, _make_shared(value))
+
 class AI:
 	def __init__(self, socket):
 		__main__.game = socket
 		self._connected = False
-	def name(self, name):
-		__main__.Public = {}
-		__main__.Private = {}
+	def webgame_init(self, name):
+		__main__.Public = Shared_Object()
+		__main__.Private = Shared_Object()
 		__main__.name = name
 		self._user = __main__.AI()
 	def _make_changes(self, obj, value, changes, path):
@@ -99,10 +139,10 @@ class AI:
 					del target[path[-1]]
 		elif obj[0] is __main__.Public:
 			changes = __main__.Public
-			__main__.Public = value
+			__main__.Public = _make_shared(value)
 		elif obj[0] is __main__.Private:
 			changes = __main__.Private
-			__main__.Private = value
+			__main__.Private = _make_shared(value)
 		else:
 			raise AssertionError('BUG: invalid object for update')
 		return changes
@@ -114,13 +154,13 @@ class AI:
 				self._connected = True
 				# Join a game if we can.
 				if len(__main__.Public['games']) > 0:
-					if config['name'] in __main__.Public['games']:
-						__main__.game.join(config['name'])
+					if config['game'] in __main__.Public['games']:
+						__main__.game.join(config['game'])
 					else:
 						__main__.game.join(__main__.Public['games'][0])
 				else:
 					# If not, create a new game.
-					__main__.game.new(config['name'])
+					__main__.game.new(config['game'])
 		else:
 			if 'name' in changes and changes['name'] == '':
 				# First connection.
@@ -130,9 +170,7 @@ class AI:
 					websocketd.log('No new_game or update defined')
 				if len(__main__.Private) > 0 and hasattr(self._user, 'Private_update'):
 					self._user.Private_update({})
-				elif hasattr(self._user, 'update'):
-					self._user.update()
-			elif hasattr(self._user, 'Public_update'):
+			if hasattr(self._user, 'Public_update'):
 				self._user.Public_update(changes)
 			elif hasattr(self._user, 'update'):
 				self._user.update()
@@ -161,11 +199,15 @@ class AI:
 			return getattr(self._user, attr)(*a, **ka)
 		return ret
 
+def disconnect(socket, data):
+	'''Handle socket disconnect'''
+	websocketd.endloop()
+
 def run():
 	global config
-	config = fhs.module_get_config('game')
+	config = fhs.module_get_config('webgame_client')
 	fhs.is_game = True
-	connection = websocketd.RPC('8891', AI, url = '?name=' + config['myname'], tls = False)
+	connection = websocketd.RPC(config['port'], AI, url = '?name=' + config['name'], tls = False, disconnect_cb = disconnect)
 	websocketd.fgloop()
 
 __main__.run = run

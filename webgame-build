@@ -7,11 +7,11 @@
 - Add header and footer to main file so it is an executable.
 - Run the newly built server.
 
-The result is placed in the location for webgames, $(XDG_DATA_HOME)/webgame by
-default.  Under there, the game is placed named game, the assets are
-placed in html/game/, and extra python files are placed under
-modules/game/.  The generated header in the executable adds that path to
-the module search path if it is created.
+The result is placed in the location for webgames,
+$(XDG_DATA_HOME)/python3-webgame by default.  Under there, the game is placed
+named game, the assets are placed in html/game/, and extra python files are
+placed under modules/game/.  The generated header in the executable adds that
+path to the module search path if it is created.
 
 If modules that are used by the builder are included from the main source
 directory, they are copied into the build directory.  network, websocketd and
@@ -26,6 +26,7 @@ html/rpc.js
 html/webgame.js
 html/webgame.css
 html/game/*.js
+html/game/*.css
 html/game/index.html
 html/game/img/*.png
 html/game/jta/*.jta
@@ -42,8 +43,16 @@ import os
 import shutil
 import json
 import subprocess
+import io
+import gettext
 
-config = fhs.init({'src': '.', 'dest': '', 'link': True, 'name': '', 'base': '', 'run': True}, game = True, packagename = 'python3-webgame')
+fhs.option('src', 'source directory', default = '.')
+fhs.option('dest', 'destination directory', default = '')
+fhs.option('copy', 'copy files (default is symlink)', argtype = bool)
+fhs.option('name', 'game name (default is program name', default = '')
+fhs.option('base', 'website base URI', default = '')
+fhs.option('build-only', 'do not run the game after building', argtype = bool)
+config = fhs.init(game = True, packagename = 'python3-webgame')
 # }}}
 
 # Find source files. {{{
@@ -59,10 +68,13 @@ modules = [x for x in os.listdir(config['src']) if x.endswith(os.extsep + 'py') 
 jssrc = os.path.join(config['src'], 'html')
 if os.path.isdir(jssrc):
 	js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
+	css = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'css') and not os.path.isdir(os.path.join(jssrc, x))]
 else:
 	websocketd.log('Warning: no html directory found in {}; game will be useless'.format(config['src']))
 	js = []
+	css = []
 js.sort()
+css.sort()
 # }}}
 
 # Create destination directory. {{{
@@ -78,26 +90,74 @@ def copy(src, dst): # {{{
 	base = os.path.dirname(dst)
 	if not os.path.isdir(base):
 		os.makedirs(base)
-	if config['link']:
-		if os.path.exists(dst):
-			os.unlink(dst)
-		os.symlink(src, dst, os.path.isdir(src))
-	else:
+	if config['copy']:
 		if os.path.exists(dst):
 			shutil.deltree(dst)
 		shutil.copytree(src, dst)
+	else:
+		if os.path.exists(dst):
+			os.unlink(dst)
+		os.symlink(src, dst, os.path.isdir(src))
 # }}}
 
-# Write javascript files. {{{
+# Write javascript and css files. {{{
 for j in js:
+	copy(os.path.join(jssrc, j), os.path.join(dest, 'html', 'game', j))
+for j in css:
 	copy(os.path.join(jssrc, j), os.path.join(dest, 'html', 'game', j))
 # }}}
 
-# Write or link python modules.
+# Merge, compile and install translations for Python. {{{
+sysdir = fhs.read_data('po', dir = True)
+syslang = {os.path.splitext(f)[0] for f in os.listdir(sysdir)}
+gamedir = os.path.join(config['src'], 'po')
+if os.path.isdir(gamedir):
+	gamelang = {os.path.splitext(f)[0] for f in os.listdir(gamedir)}
+else:
+	gamelang = set()
+languages = syslang.union(gamelang)
+for lang in languages:
+	syspo = os.path.join(sysdir, lang + os.extsep + 'po')
+	gamepo = os.path.join(gamedir, lang + os.extsep + 'po')
+	merged = [po for po in (syspo, gamepo) if os.path.exists(po)]
+	os.makedirs(os.path.join(dest, 'po', lang, 'LC_MESSAGES'))
+	subprocess.run('msgcat {} | grep -v "^#, fuzzy$" | msgfmt -o {} -'.format(' '.join(merged), os.path.join(dest, 'po', lang, 'LC_MESSAGES', main + os.extsep + 'mo')), shell = True, close_fds = True)
+# }}}
+
+# Merge, compile and install translations for javascript. {{{
+sysdir = fhs.read_data('po.js', dir = True)
+syslang = {os.path.splitext(f)[0] for f in os.listdir(sysdir)}
+gamedir = os.path.join(config['src'], 'po.js')
+if os.path.isdir(gamedir):
+	gamelang = {os.path.splitext(f)[0] for f in os.listdir(gamedir)}
+else:
+	gamelang = set()
+languages = syslang.union(gamelang)
+for lang in languages:
+	syspo = os.path.join(sysdir, lang + os.extsep + 'po') if sysdir is not None else None
+	gamepo = os.path.join(gamedir, lang + os.extsep + 'po') if gamedir is not None else None
+	merged = [po for po in (syspo, gamepo) if po is not None and os.path.exists(po)]
+	data = subprocess.run('msgcat {} | grep -v "^#, fuzzy$" | msgfmt -o - -'.format(' '.join(merged)), shell = True, close_fds = True, stdout = subprocess.PIPE).stdout
+	try:
+		terms = gettext.GNUTranslations()
+		terms._parse(io.BytesIO(data))
+	except:
+		continue
+	os.makedirs(os.path.join(dest, 'html', 'game', 'lang'))
+	def escape(s):
+		return s.replace('\n', '\\n').replace('"', '\\"')
+	with open(os.path.join(dest, 'html', 'game', 'lang', lang + '.js'), 'w') as f:
+		f.write('_translations["%s"] = {\n' % lang)
+		f.write(',\n'.join('"' + escape(k) + '": "' + escape(v) + '"' for k, v in terms._catalog.items()))
+		f.write('\n};\n')
+# }}}
+
+# Write or link python modules. {{{
 if len(modules) > 0:
 	os.makedirs(os.path.join(dest, 'modules'))
 	for m in modules:
 		copy(os.path.join(config['src'], m), os.path.join(dest, 'modules', m))
+# }}}
 
 def makeaudio(dirobj, dir): # {{{
 	if not os.path.isdir(dir):
@@ -174,8 +234,8 @@ if not any(can):
 		copy(t[0], t[1])
 elif can[False]:
 	use3d = '\tuse_3d = false;'
-	loader_js = loader_js[True]
-	for t in targets[True]:
+	loader_js = loader_js[False]
+	for t in targets[False]:
 		copy(t[0], t[1])
 with open(os.path.join(dest, 'html', 'webgame' + os.extsep + 'js'), 'w') as f:
 	f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'js')).read().replace('#LOAD#', loader_js).replace('#AUDIO#', audio).replace('#USE3D#', use3d))
@@ -192,7 +252,7 @@ copy(fhs.read_data('builders' + os.extsep + 'js', opened = False, packagename = 
 # Create main html file. {{{
 index = os.path.join(dest, 'html', 'game', 'index' + os.extsep + 'html')
 with open(index, 'w') as f:
-	files = ["\t\t<script type='application/javascript' src='webgame.js'></script>"] + ["\t\t<script type='application/javascript' src='game/{}'></script>".format(f) for f in js]
+	files = ["\t\t<script type='application/javascript' src='webgame.js'></script>"] + ["\t\t<script type='application/javascript' src='game/{}'></script>".format(f) for f in js] + ["\t\t<link rel='stylesheet' href='webgame.css'/>"] + ["\t\t<link rel='stylesheet' href='game/{}'/>".format(f) for f in css]
 	#print('name: {}\nbase: {}\nsource: {}'.format(name, webbase, files))
 	f.write(fhs.read_data(os.path.join('html', 'webgame' + os.extsep + 'html')).read().replace('#NAME#', name).replace('#BASE#', webbase).replace('#SOURCE#', '\n'.join(files)))
 # Make it the default page.
@@ -203,10 +263,11 @@ copy(index, os.path.join(dest, 'html', 'index' + os.extsep + 'html'))
 with open(os.path.join(dest, main), 'w') as f:
 	f.write('#!/usr/bin/python3\n')
 	f.write('import sys\n')
-	f.write("sys.path = ['{}'] + sys.path\n".format(os.path.join(dest, 'modules')))
 	if len(modules) > 0:
 		f.write("sys.path = ['{}'] + sys.path\n".format(os.path.join(dest, 'modules')))
 	f.write('import webgame\n')
+	f.write('import gettext\n')
+	f.write('gettext.install("{0}", "{1}")\n'.format(main, os.path.join(dest, 'po')))
 	f.write(open(os.path.join(config['src'], main + os.extsep + 'gpy')).read())
 	f.write('\nwebgame.Game()\n')
 os.chmod(os.path.join(dest, main), 0o755)
@@ -230,7 +291,7 @@ for m in sys.modules:
 # }}}
 
 # Run. {{{
-if config['run']:
+if not config['build-only']:
 	subprocess.Popen([os.path.join(dest, main)], close_fds = True).communicate()
 # }}}
 

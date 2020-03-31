@@ -17,7 +17,7 @@
 - Bitmap image editing
 
 # Installation
-If pythhon-{fhs,network,websocketd} are not installed on the system, copy the
+If python-{fhs,network,websocketd} are not installed on the system, copy the
 module files ({fhs,network,websocketd}.py) into the python-webgame directory.
 
 Copy or link mgrl.js and demos/gl-matrix.js from the m.grl source into the html

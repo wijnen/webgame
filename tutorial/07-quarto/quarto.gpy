@@ -1,4 +1,4 @@
-# vim: set tabstop=4 :
+# vim: set tabstop=4 filetype=python :
 
 '''Quarto: simple game to demonstrate the use of the python-webgame system.
 This is a two player game.  Every turn, one player picks a piece and the other

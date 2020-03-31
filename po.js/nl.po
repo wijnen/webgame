@@ -1,0 +1,78 @@
+# Dutch translation of webgame system files (web parts)
+# Copyright (C) 2020 Bas Wijnen
+# This file is distributed under the same license as the python-webgame package.
+# Bas Wijnen <wijnen@deiban.org>, 2020
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: 0.2\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2020-04-04 10:35+0200\n"
+"PO-Revision-Date: 2020-04-01 00:27+0200\n"
+"Last-Translator: Bas Wijnen <wijnen@debian.org>\n"
+"Language-Team: Dutch <nl@li.org>\n"
+"Language: nl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: standaardinvoer:1
+msgid "Running Games"
+msgstr "Lopende spellen"
+
+#: standaardinvoer:2
+msgid "Join"
+msgstr "Meedoen"
+
+#: standaardinvoer:3
+msgid "Watch"
+msgstr "Kijken"
+
+#: standaardinvoer:4 standaardinvoer:5
+msgid "Create New Game"
+msgstr "Maak een nieuw spel"
+
+#: standaardinvoer:6
+msgid "Name:"
+msgstr "Naam:"
+
+#: standaardinvoer:7
+msgid "Number of players:"
+msgstr "Aantal spelers:"
+
+#: standaardinvoer:8
+msgid "Personal"
+msgstr "Persoonlijk"
+
+#: standaardinvoer:9
+msgid "Your name:"
+msgstr "Je naam:"
+
+#: standaardinvoer:10
+msgid "Set language to"
+msgstr "Kies taal:"
+
+#: standaardinvoer:11
+msgid ""
+"Note: you can set defaults for your name and language in the location "
+"using /?name=yourname&language=yourlanguage"
+msgstr ""
+"Let op: je kan de startwaarden voor je naam en de taal in meegeven in de "
+"adresbalk als /?name=jenaam&language=jetaal"
+
+#: standaardinvoer:12
+msgid "Leave game"
+msgstr "Verlaten"
+
+#: html/webgame.js:78
+msgid "Ignoring invalid watch path $1, must start with Public or Private"
+msgstr ""
+"Ongeldig volgpad $1 wordt genegeerd, moet beginnen met Public of Private"
+
+#: html/webgame.js:247
+msgid "Attempting to set undefined language $1"
+msgstr "Instellen van onbekende taal $1 mislukt"
+
+#: html/webgame.js:306
+msgid "not set"
+msgstr "niet ingesteld"
