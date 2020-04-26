@@ -5,6 +5,7 @@
 var use_3d;
 var mouse_navigation = true;
 var viewport = [-20, -15, 20, 15];	// Initial camera viewport.
+var show_players = false;	// If true, show the player list at bottom.
 
 function playercolor(num) { // {{{
 	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
@@ -12,15 +13,24 @@ function playercolor(num) { // {{{
 	return colors[num];
 } // }}}
 
-function title_make_option(select, name, n) { // {{{
-	var ret = Create('option').AddText(name);
-	ret.value = name;
+function title_make_option(select, game, n) { // {{{
+	var ret = Create('option');
+	ret.value = game[0];
+	ret.players = game[1];
 	if (n >= select.options.length) {
 		select.appendChild(ret);
 	}
 	else {
 		select.insertBefore(ret, select.options[n]);
 	}
+	ret.update_players = function() {
+		var num = 0;
+		for (var p = 0; p < this.players.length; ++p) {
+			if (this.players[p] !== null)
+				num += 1;
+		}
+		this.ClearAll().AddText(this.value + ' (' + num + '/' + this.players.length + ')');
+	};
 	return ret;
 } // }}}
 
@@ -31,14 +41,26 @@ function title_make_option(select, name, n) { // {{{
 var Public, Private;	// Shared data.
 var title_gamelist = [];	// Games which are available in the title screen.
 var title_select;	// Select element on title screen (for changing style).
-var serverobj, server;	// Remote server connection and proxy object. Note that using the proxy object does not work in all browsers.
+var server;	// Remote server connection.
 var audio;	// Object with all registered audio files as its members.
 var my_name = null;	// Player name, as returned by the server.
 var my_num = null;	// Player number of me, or null if not playing.
 
-function _(message) {	// Support for translations. {{{
-	if (_translations !== undefined && _translations[_language] !== undefined && _translations[_language][message] !== undefined)
-		message = _translations[_language][message];
+function _(message, force_args) {	// Support for translations. {{{
+	if (_translations !== undefined) {
+		if (_translations[_language] !== undefined && _translations[_language][message] !== undefined)
+			message = _translations[_language][message];
+		else {
+			// _languages is a list of languages, sorted by user preference.
+			for (var t = 0; t < _languages; ++t) {
+				l = _languages[t];
+				if (_translations[t] !== undefined && _translations[t][message] !== undefined) {
+					message = _translations[t][message];
+					break;
+				}
+			}
+		}
+	}
 	var parts = [''];
 	var substs = [];
 	while (message.length > 0) {
@@ -54,7 +76,7 @@ function _(message) {	// Support for translations. {{{
 		parts.push('');
 	}
 	parts[parts.length - 1] += message;
-	if (parts.length == 1)
+	if (parts.length == 1 && !force_args)
 		return parts[0];
 	return function() {
 		var ret = parts[0];
@@ -90,7 +112,7 @@ function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
 	}
 	if (add_cb && (typeof target == 'object' && target !== null)) {
 		for (var attr in target)
-			add_cb(attr, target[attr]);
+			add_cb(attr, target[attr], undefined);
 	}
 	// Watch changes.
 	watch(path, function(value, old) {
@@ -98,7 +120,7 @@ function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
 			// Not an object. If old is, call remove for all members.
 			if (remove_cb && (typeof old == 'object' || old === null)) {
 				for (var attr in old)
-					remove_cb(attr, old[attr]);
+					remove_cb(attr, undefined, old[attr]);
 			}
 			return;
 		}
@@ -106,7 +128,7 @@ function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
 			// It wasn't an object. Call add for all members.
 			if (add_cb) {
 				for (var attr in value)
-					add_cb(attr, value[attr]);
+					add_cb(attr, value[attr], undefined);
 			}
 			return;
 		}
@@ -114,13 +136,13 @@ function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
 		if (remove_cb) {
 			for (var attr in old) {
 				if (value[attr] === undefined)
-					remove_cb(attr, old[attr]);
+					remove_cb(attr, undefined, old[attr]);
 			}
 		}
 		for (var attr in value) {
 			if (old[attr] === undefined) {
 				if (add_cb)
-					add_cb(attr, value[attr]);
+					add_cb(attr, value[attr], undefined);
 			}
 			else if (value[attr] != old[attr]) {
 				if (change_cb)
@@ -199,7 +221,7 @@ function del_div(node) { // {{{
 
 function pos_from_event(event) { // {{{
 	var pos = please.dom.pos_from_event(event.clientX, event.clientY);
-	return [pos[0] + camera.location_x, pos[1] + camera.location_y];
+	return [pos[0] + window.camera.location_x, pos[1] + window.camera.location_y];
 } // }}}
 
 function edit_texture(instance, tname, editor) { // {{{
@@ -229,10 +251,10 @@ function player_texture(instance, num) { // {{{
 // Internal variables and functions. {{{
 
 // Global variables. {{{
-var _body, _state, _titlescreen, _title_title, _mainscreen, _footer, _title_selection, _canvas;
+var _body, _state, _titlescreen, _mainscreen, _footer, _title_selection, _canvas, _game, _owner, _noowner, _claim, _release, _players, _vdiv, _chatter;
 var _gametitle;
 var _audio;
-var _players = [], _playerdiv;
+var _playerrows = [];
 var _watchlist = [];
 var _canvas_list = [];
 var _div_list = [];
@@ -240,84 +262,224 @@ var _translations = {};
 var _languages, _language;
 // }}}
 
+function _update_url() { // {{{
+	if (my_name === undefined)
+		return;
+	var lang;
+	if (_language === undefined)
+		lang = '';
+	else
+		lang = '&lang=' + encodeURIComponent(_language);
+	history.replaceState(null, document.title, document.location.protocol + '//' + document.location.host + '/?name=' + encodeURIComponent(my_name) + lang);
+} // }}}
+
 function _set_language(language) { // {{{
-	if (_translations[language] === undefined) {
+	if (language == '')
+		language = undefined;
+	else if (_translations[language] === undefined) {
 		console.error(_('Attempting to set undefined language $1')(language));
 		return;
 	}
 	_language = language;
 	for (var e in _translatable)
-		_translatable[e].ClearAll().AddText(_(e));
+		for (var k = 0; k < _translatable[e].length; ++k)
+			_translatable[e][k].ClearAll().AddText(_(e));
+	_update_url();
 } // }}}
 
 AddEvent('load', function() { // {{{
-	_body = document.getElementsByTagName('body')[0];
-	_state = document.getElementById('state');
-	// Set up translations.
-	_translatable = {};
-	var elements = document.getElementsByClassName('translate');
-	for (var e = 0; e < elements.length; ++e)
-		_translatable[elements[e].textContent] = elements[e];
-	Public = { state: '', name: '' };
-	Private = { state: '' };
-	_makestate();
-	var messages = {
-		webgame_init: _webgame_init,
-		Public_update: _Public_update,
-		Private_update: _Private_update,
-		'': function() {
-			var name = arguments[0];
-			var args = [];
-			for (var a = 1; a < arguments.length; ++a)
-				args.push(arguments[a]);
-			window[name].apply(window, args);
+	var xhr = new XMLHttpRequest();
+	xhr.AddEvent('loadend', function() {
+		var lines = xhr.responseText.split('\n');
+		var load = [[], []];
+		use_3d = true;
+		var head = document.getElementsByTagName('head')[0];
+		var loading = 0;
+		for (var l = 0; l < lines.length; ++l) {
+			if (lines[l].replace(/\s*/, '') == '')
+				continue;
+			var parts = lines[l].split(':', 2);
+			var key = parts[0].replace(/^\s*([a-z23]*)\s*$/, '$1');
+			var value = parts[1].replace(/^\s*(.*?)\s*$/, '$1');
+			if (key == 'title') {
+				document.getElementsByTagName('title')[0].ClearAll().AddText(value);
+				document.getElementById('game_title').ClearAll().AddText(value);
+			}
+			else if (key == 'base')
+				head.AddElement('base').href = value;
+			else if (key == 'script') {
+				loading += 1;
+				var script = head.AddElement('script');
+				script.AddEvent('load', load_done);
+				script.src = value;
+			}
+			else if (key == 'style') {
+				loading += 1;
+				var link = head.AddElement('link');
+				link.AddEvent('load', load_done);
+				link.rel = 'stylesheet';
+				link.href = value;
+			}
+			else if (key == 'use3d')
+				use_3d = (value == 'True');
+			else if (key == 'load') {
+				load[0].push(value);
+				load[1].push(value);
+			}
+			else if (key == 'load2d')
+				load[0].push(value);
+			else if (key == 'load3d')
+				load[1].push(value);
+			else
+				console.error('invalid line in config file:', lines[l]);
 		}
-	};
-	serverobj = Rpc(messages,
-		function() { _body.RemoveClass('disconnected'); },
-		function() { _body.AddClass('disconnected'); });
-	try {
-		server = serverobj.proxy;
-	}
-	catch (e) {
-		server = null;
-	}
+		// First load all new javascript, then run remaining code and start m.grl machinery.
+		function load_done() {
+			loading -= 1;
+			if (loading > 0)
+				return;
+			if (use_3d) {
+				if (document.location.search[0] == '?') {
+					var s = document.location.search.substring(1).split('&');
+					for (var i = i; i < s.length; ++i) {
+						var kv = s[i].split('=', 1);
+						if (kv[0] == '2d' && kv[1] != '0') {
+							use_3d = false;
+							break;
+						}
+					}
+				}
+			}
+			if (use_3d)
+				please.gl.set_context('canvas');
+			else
+				please.dom.set_context('canvas');
+			var paths = ['img', 'jta', 'gani', 'audio', 'glsl', 'text'];
+			for (var i = 0; i < paths.length; ++i)
+				please.set_search_path(paths[i], 'webgame/' + paths[i]);
+			// Set up audio system.
+			// _audio is an object with the audio data for all the files.
+			// _audio is a flat object. Keys of _audio are filenames.
+			// audio has members which are functions to call play on _audio members.
+			// audio is not flat. Subdirectories are separate objects in audio.
+			// Example: _audio['sfx/bang.wav'] can be played with audio.sfx.bang().
+			// Because the files have not yet been loaded here,
+			// _audio is filled with filename keys, but values are path lists like ['sfx', 'bang'], not audio data.
+			// audio is not set up yet.
+			_audio = {};
+			audio = {};
+			var list = load[use_3d ? 1 : 0];
+			if (list.length > 0) {
+				for (var f = 0; f < list.length; ++f) {
+					console.info('loading', list[f]);
+					please.load(list[f]);
+					var ext = list[f].substr(-4);
+					if (ext == '.ogg' || ext == '.wav' || ext == '.mp3')
+						_audio[list[f]] = list[f].substr(0, list[f].length - 4).split('/');
+				}
+			}
+			else
+				window.dispatchEvent(new CustomEvent("mgrl_media_ready"));
+		}
+		if (loading == 0)
+			load_done();
+	});
+	xhr.responseType = 'text';
+	xhr.open('GET', 'config.txt');
+	xhr.send();
 }); // }}}
 
-function _webgame_init(name) { // {{{
+function _id(name, num) { // {{{
 	my_name = name;
-	my_num = null;
-	document.getElementById('title_game_name').value = my_name;
+	my_num = num;
+	_update_url();
+} // }}}
+
+function _webgame_init(languages) { // {{{
+	// Set up language select.
+	var have_languages = [];
+	for (var language in _translations)
+		have_languages.push(language);
+	have_languages.sort();
+	_languages = [];
+	outer: for (var l = 0; l < languages.length; ++l) {
+		var test = [function(a, b) { return a == b; }, function(a, b) { return a[0] + a[1] == b[0] + b[1]; }];
+		for (var t = 0; t < test.length; ++t) {
+			for (var candidate = 0; candidate < have_languages.length; ++candidate) {
+				if (test[t](languages[l], have_languages[candidate])) {
+					_languages.push(have_languages[candidate]);
+					have_languages.splice(candidate, 1);
+					continue outer;
+				}
+			}
+		}
+	}
+	_languages.push('');
+	for (var l = 0; l < have_languages.length; ++l)
+		_languages.push(have_languages[l]);
+	var select = document.getElementById('language_select');
+	if (_languages.length == 0)
+		select.AddClass('hidden');
+	else {
+		for (var e in _languages) {
+			if (_languages[e] == '') {
+				var option = select.AddElement('option').AddText('English (source code)');
+				option.value = '';
+			}
+			else {
+				var translation = _translations[_languages[e]];
+				var name = translation['Language Name'];
+				select.AddElement('option').AddText(name + ' (' + _languages[e] + ')').value = _languages[e];
+			}
+		}
+	}
+	_set_language(_languages[0]);
+	document.getElementById('title_game_name').value = _("$1's game")(my_name);
+	document.getElementById('playername').value = my_name;
 	_gametitle = document.title;
 	_titlescreen = document.getElementById('title');
 	_mainscreen = document.getElementById('notitle');
 	_footer = document.getElementById('footer');
-	_title_title = document.getElementById('game_title');
 	_title_selection = document.getElementById('titleselection');
 	title_select = document.getElementById('title_games');
-	_playerdiv = document.getElementById('players');
 	_canvas = document.getElementById('canvas');
-	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
-#USE3D#
-	if (use_3d)
-		please.gl.set_context('canvas');
-	else
-		please.dom.set_context('canvas');
-	please.set_search_path('img', 'img');
-	please.set_search_path('jta', 'jta');
-	please.set_search_path('gani', 'gani');
-	please.set_search_path('audio', 'audio');
-	please.set_search_path('glsl', 'glsl');
-	please.set_search_path('text', 'text');
-	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
-#LOAD#
+	_game = document.getElementById('game');
+	_owner = document.getElementById('owner');
+	_noowner = document.getElementById('noowner');
+	_claim = document.getElementById('claim');
+	_release = document.getElementById('release');
+	_players = document.getElementById('players');
+	_vdiv = document.getElementById('vdiv');
+	_chatter = document.getElementById('chatter');
+	_vdiv.AddEvent('mousedown', _resize_chat);
+	_game.AddClass('hidden');
+} // }}}
+
+function _resize_chat(event) { // {{{
+	document.AddEvent('mouseup', up).AddEvent('mousemove', move);
+	var x = event.clientX;
+	function up() {
+		event.stopPropagation();
+		document.RemoveEvent('mouseup', up).RemoveEvent('mousemove', move);
+	}
+	function move(event) {
+		event.stopPropagation();
+		var diff = (event.clientX - x) / _body.clientWidth;
+		var value = window.getComputedStyle(_body).getPropertyValue('--width');
+		var current_f = Number(value.substr(0, value.length - 1)) / 100;
+		_body.style.setProperty('--width', (current_f + diff) * 100 + '%');
+		x = event.clientX;
+		_resize_window();
+		event.preventDefault();
+		return false;
+	}
 } // }}}
 
 AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	window.graph = new please.SceneGraph();
 	window.camera = new please.CameraNode();
-	graph.add(camera);
-	graph.camera = camera;
+	graph.add(window.camera);
+	graph.camera = window.camera;
 	if (use_3d) {
 		var prog = please.glsl('default', 'simple.vert', 'diffuse.frag');
 		prog.activate();
@@ -335,16 +497,16 @@ AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		renderer.graph = graph;
 		window.camera_base = new please.GraphNode();
 		graph.add(camera_base);
-		camera.look_at = camera_base;
-		camera.up_vector = [0, 0, 1];
+		window.camera.look_at = camera_base;
+		window.camera.up_vector = [0, 0, 1];
 		camera_base.location = [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 0];
 		// Set initial distance to match requested viewport.
-		var rx = (viewport[2] - viewport[0]) / 2 / Math.tan(please.radians(camera.fov) / 2);
-		var ry = (viewport[3] - viewport[1]) / 2 / Math.tan(please.radians(camera.fov) / 2);
+		var rx = (viewport[2] - viewport[0]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
+		var ry = (viewport[3] - viewport[1]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
 		please.make_animatable(window, 'r', rx > ry ? rx : ry);
 		please.make_animatable(window, 'theta', -90);
 		please.make_animatable(window, 'phi', 30);
-		camera.location = function() {
+		window.camera.location = function() {
 			return [camera_base.location_x + r * Math.cos(please.radians(theta)) * Math.cos(please.radians(phi)),
 				camera_base.location_y + r * Math.sin(please.radians(theta)) * Math.cos(please.radians(phi)),
 				camera_base.location_z + r * Math.sin(please.radians(phi))]; };
@@ -399,36 +561,66 @@ AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		please.set_viewport(renderer);
 	}
 	else {
-		camera.look_at = function() { return [camera.location_x, camera.location_y, 0]; };
-		camera.location = function() { return [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 100]; };
+		window.camera.look_at = function() { return [window.camera.location_x, window.camera.location_y, 0]; };
+		window.camera.location = function() { return [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 100]; };
 	}
-	camera.activate();
-	camera.update_camera();
+	window.camera.activate();
+	window.camera.update_camera();
 
-	_audio = {};
-	audio = {};
-	var make_play = function(target) {
-		var name = '';
+	// Finish setting up audio system.
+	for (var a in _audio) {
+		var path = _audio[a];
 		var obj = audio;
-		for (var i = 0; i < target[0].length; ++i) {
-			name += target[0][i] + '/';
-			if (obj[target[0][i]] === undefined)
-				obj[target[0][i]] = {};
-			obj = obj[target[0][i]];
+		for (var p = 0; p < path.length - 1; ++p) {
+			if (obj[path[p]] === undefined)
+				obj[path[p]] = {}
+			obj = obj[path[p]];
 		}
-		_audio[name + target[2]] = please.access(name + target[1]);
-		obj[target[2]] = function(loop) {
-			_audio[name + target[2]].loop = loop === true;
-			if (loop !== false) {
-				_audio[name + target[2]].fastSeek(0);
-				_audio[name + target[2]].play();
-			}
-		};
+		_audio[a] = please.access(a);
+		(function(a) {	// This function creates a private copy of a for each iteration.
+			obj[path[path.length - 1]] = function(loop) {
+				_audio[a].loop = loop === true;
+				if (loop === null)
+					_audio[a].stop();
+				else if (loop !== false) {
+					_audio[a].currentTime = 0;
+					_audio[a].play();
+				}
+			};
+		})(a);
+	}
+
+	// Initialize game data.
+	_body = document.getElementsByTagName('body')[0];
+	_state = document.getElementById('state');
+	// Set up translations.
+	_translatable = {};
+	var elements = document.getElementsByClassName('translate');
+	for (var e = 0; e < elements.length; ++e) {
+		var tag = elements[e].textContent;
+		if (_translatable[tag] === undefined)
+			_translatable[tag] = [];
+		_translatable[tag].push(elements[e]);
+	}
+	Public = { state: '', name: '' };
+	Private = { state: '' };
+	set_state('');
+	var messages = {
+		webgame_init: _webgame_init,
+		id: _id,
+		Public_update: _Public_update,
+		Private_update: _Private_update,
+		'': function() {
+			var name = arguments[0];
+			var args = [];
+			for (var a = 1; a < arguments.length; ++a)
+				args.push(arguments[a]);
+			window[name].apply(window, args);
+		}
 	};
-	// TODO: Make this hardcoded in here and in webgame.py instead of webgame-build.
-	var audio_data = (#AUDIO#);
-	for (var s = 0; s < audio_data.length; ++s)
-		make_play(audio_data[s]);
+	server = Rpc(messages,
+		function() { _body.RemoveClass('disconnected'); },
+		function() { _body.AddClass('disconnected'); });
 
 	window.AddEvent('resize', _resize_window);
 	if (!use_3d && window.init_2d !== undefined) window.init_2d();
@@ -436,51 +628,43 @@ AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	if (window.init !== undefined) window.init();
 })); // }}}
 
+function _server_reply() { // {{{
+	if (window.reply !== undefined)
+		window.reply.apply(window.reply, arguments);
+	else if (arguments[0] !== null)
+		alert(_('Server replied: $1')(arguments[0]));
+} // }}}
+
+function game(target) { // {{{
+	var args = [];
+	for (var i = 1; i < arguments.length; ++i)
+		args.push(arguments[i]);
+	server.call(target, args, {}, _server_reply);
+} // }}}
+
 AddEvent('mgrl_dom_context_changed', function() { // {{{
 	if (window.update_canvas && !use_3d)
 		window.update_canvas(please.dom.context);
 }); // }}}
 
 function _title_join() { // {{{
-	var game = title_select.options[title_select.selectedIndex].value;
-	serverobj.call('join', [game]);
+	var which = title_select.options[title_select.selectedIndex].value;
+	game('join', which);
 } // }}}
 
 function _title_view() { // {{{
-	var game = title_select.options[title_select.selectedIndex].value;
-	serverobj.call('view', [game]);
+	var which = title_select.options[title_select.selectedIndex].value;
+	game('view', which);
 } // }}}
 
 function _title_new() { // {{{
-	serverobj.call('new', [document.getElementById('title_game_name').value, Number(document.getElementById('title_num_players').value)]);
+	var gamename = document.getElementById('title_game_name').value;
+	var num_players = Number(document.getElementById('title_num_players').value);
+	game('new', gamename, num_players);
 } // }}}
 
-function _leave() { // {{{
-	serverobj.call('leave', []);
-} // }}}
-
-function _makestate() { // {{{
-	_state.ClearAll().AddText((Public.state || '') + ((Private && Private.state) || ''));
-	if (!Public.players)
-		return;
-	while (Public.players.length < _players.length)
-		_playerdiv.removeChild(_players.pop()[0]);
-	while (_players.length < Public.players.length)
-		_players.push([_playerdiv.AddElement('span', 'player'), null]);
-	my_num = null;
-	for (var p = 0; p < _players.length; ++p) {
-		if (_players[p][1] != Public.players[p].name) {
-			_players[p][1] = Public.players[p].name;
-			_players[p][0].ClearAll().AddText(_players[p][1]);
-			_players[p][0].style.color = playercolor(p);
-			if (my_name == _players[p][1])
-				_players[p][0].AddClass('self');
-			else
-				_players[p][0].RemoveClass('self');
-		}
-		if (my_name == _players[p][1])
-			my_num = p;
-	}
+function set_state(value) { // {{{
+	_state.ClearAll().AddText(value);
 } // }}}
 
 function _resize_window() { // {{{
@@ -501,8 +685,8 @@ function _resize_window() { // {{{
 		}
 		_canvas.width = size[0];
 		_canvas.height = size[1];
-		camera.width = _canvas.width;
-		camera.height = _canvas.height;
+		window.camera.width = _canvas.width;
+		window.camera.height = _canvas.height;
 		if (use_3d)
 			gl.viewport(0, 0, size[0], size[1]);
 		else {
@@ -515,7 +699,7 @@ function _resize_window() { // {{{
 				please.dom.orthographic_grid = size[0] / vw;
 			window.camera.orthographic_grid = please.dom.orthographic_grid;
 			please.dom.canvas_changed();
-			camera.update_camera();
+			window.camera.update_camera();
 		}
 	}
 	please.__align_canvas_overlay();
@@ -536,7 +720,7 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 	please.dom.context.fillStyle = 'white';
 	please.dom.context.fill();
 	if (window.camera !== undefined)
-		please.dom.context.translate(-camera.location_x, -camera.location_y);
+		please.dom.context.translate(-window.camera.location_x, -window.camera.location_y);
 	if (window.update_canvas && !use_3d)
 		window.update_canvas(please.dom.context);
 }); // }}}
@@ -569,7 +753,16 @@ function _update(is_public, path, value) { // {{{
 		var target = top;
 		for (var i = 0; i < path.length - 1; ++i)
 			target = target[path[i]];
-		target[path[path.length - 1]] = value;
+		var key = path[path.length - 1];
+		if (value !== undefined)
+			target[key] = value;
+		else {
+			delete target[key];
+			if (target instanceof Array) {
+				while (target[target.length - 1] === undefined)
+					target.length -= 1;
+			}
+		}
 	}
 	else if (is_public)
 		Public = value;
@@ -595,10 +788,13 @@ function _Public_update(path, value) { // {{{
 	//console.info('update', path, value);
 	var oldname = Public.name;
 	_update(true, path, value);
-	_makestate();
 	if (Public.name == '') {
 		// Title screen.
 		document.title = _gametitle;
+		_game.AddClass('hidden');
+		// Clean up old game.
+		if (oldname != '' && window.end_game !== undefined)
+			window.end_game();
 		// Set number of players for new games.
 		if (Public.min_players == Public.max_players) {
 			document.getElementById('numplayers').AddClass('hidden');
@@ -606,19 +802,28 @@ function _Public_update(path, value) { // {{{
 		}
 		else {
 			document.getElementById('numplayers').RemoveClass('hidden');
+			var range = document.getElementById('range');
 			if (Public.max_players === null)
-				document.getElementById('range').ClearAll().AddText('(' + Public.max_players + ' or more)');
+				range.ClearAll().AddText('(' + Public.max_players + ' or more)');
 			else
-				document.getElementById('range').ClearAll().AddText('(' + Public.min_players + ' - ' + Public.max_players + ')');
+				range.ClearAll().AddText('(' + Public.min_players + ' - ' + Public.max_players + ')');
+			if (range.value == '')
+				range.value = Public.min_players;
 		}
 		// Show title screen.
-		_title_title.ClearAll().AddText(Public.title);
-		var games = Public.games || [];
+		var games = [];
+		// Add all remote games in a sorted list.
+		if (Public.games) {
+			for (var g in Public.games)
+				games.push([g, Public.games[g]]);
+			games.sort();
+		}
 		// Remove titles that aren't in the list.
-		var new_list = [];
+		var new_list = [];	// Remeber items that should remain in the list.
 		for (var g = 0; g < title_gamelist.length; ++g) {
+			// Put each game that is in both old and remote lists also in the new list. Omit the rest.
 			for (var n = 0; n < games.length; ++n) {
-				if (games[n] == title_gamelist[g][0]) {
+				if (games[n][0] == title_gamelist[g][0]) {
 					new_list.push(title_gamelist[g]);
 					break;
 				}
@@ -628,16 +833,24 @@ function _Public_update(path, value) { // {{{
 		var current = 0;
 		title_gamelist = [];
 		for (var n = 0; n < games.length; ++n) {
+			// Remove games that are not in the new list from the selection.
 			while (current < new_list.length && n < title_select.options.length && new_list[current][0] != title_select.options[n].value)
 				title_select.removeChild(title_select.options[n]);
-			if (current < new_list.length && games[n] == new_list[current][0]) {
+			// Add new games that aren't in the selection yet.
+			if (current < new_list.length && games[n][0] == new_list[current][0]) {
 				title_gamelist.push(new_list[current]);
 				continue;
 			}
-			title_gamelist.push([games[n], title_make_option(title_select, games[n], n)]);
+			// Add games that were already in the selection.
+			title_gamelist.push([games[n][0], title_make_option(title_select, games[n], n)]);
 		}
+		// Remove games that have not been handled at the end of the list.
 		while (title_select.options.length > n)
 			title_select.removeChild(title_select.options[n]);
+		// Update all game info.
+		for (var n = 0; n < title_gamelist.length; ++n)
+			title_gamelist[n][1].update_players();
+		// Hide selection if it is empty.
 		if (title_gamelist.length == 0)
 			_title_selection.AddClass('hidden');
 		else
@@ -657,12 +870,61 @@ function _Public_update(path, value) { // {{{
 		_mainscreen.RemoveClass('hidden');
 		_footer.RemoveClass('hidden');
 		please.renderer.overlay.RemoveClass('hidden');
+		_game.RemoveClass('hidden');
 		document.title = _gametitle + ' - ' + Public.name;
-		_resize_window();
+		if (window.camera !== undefined)
+			_resize_window();
 		if (window.update_canvas && !use_3d)
 			window.update_canvas(please.dom.context);
 		if (window.new_game)
 			window.new_game();
+	}
+	if (Public.demo)
+		_body.AddClass('demo');
+	else
+		_body.RemoveClass('demo');
+	if (Public.owner === null) {
+		_owner.AddClass('hidden');
+		_noowner.RemoveClass('hidden');
+		_claim.RemoveClass('hidden');
+		_release.AddClass('hidden');
+	}
+	else {
+		_owner.RemoveClass('hidden').ClearAll().AddText(Public.players[Public.owner].name);
+		_noowner.AddClass('hidden');
+		_claim.AddClass('hidden');
+		if (Public.owner == my_num)
+			_release.RemoveClass('hidden');
+		else
+			_release.AddClass('hidden');
+	}
+	// Update players list.
+	while (_playerrows.length > Public.players.length)
+		_players.removeChild(_playerrows.pop().tr);
+	while (_playerrows.length < Public.players.length) {
+		var num = _playerrows.length;
+		var tr = _players.AddElement('tr');
+		var icon = tr.AddElement('td').AddElement('div', 'icon');
+		icon.style.background = playercolor(num);
+		var name = tr.AddElement('td');
+		var kick = tr.AddElement('td', 'kick');
+		var button = kick.AddElement('button').AddText(_('Kick'));
+		button.type = 'button';
+		button.num = num;
+		button.AddEvent('click', function() { game('admin', 'kick', this.num); });
+		_playerrows.push({tr: tr, nametext: undefined, name: name, kick: kick});
+	}
+	for (var i = 0; i < _playerrows.length; ++i) {
+		var p = _playerrows[i];
+		var name = Public.players[i].name;
+		if (p.nametext !== name) {
+			p.name.ClearAll().AddText(name === null ? _('(not connected)') : name);
+			p.nametext = name;
+		}
+		if (my_num !== null && Public.owner == my_num && p.nametext !== null && i != my_num)
+			p.kick.RemoveClass('hidden');
+		else
+			p.kick.AddClass('hidden');
 	}
 	if (window.update !== undefined)
 		window.update();
@@ -670,7 +932,6 @@ function _Public_update(path, value) { // {{{
 
 function _Private_update(path, value) { // {{{
 	_update(false, path, value);
-	_makestate();
 	if (Public.name == '') {
 		if (window.title_update !== undefined)
 			window.title_update();
@@ -699,6 +960,57 @@ function _deepcopy(obj) { // {{{
 		console.error('unrecognized object', obj);
 		return obj;
 	}
+} // }}}
+
+function _change_name() { // {{{
+	var name = document.getElementById('playername').value;
+	game('admin', 'name', name);
+} // }}}
+
+function _select_language() { // {{{
+	var lang = document.getElementById('language_select').value;
+	_set_language(lang);
+	if (Public === undefined || Public.name === undefined)
+		return;
+	if (Public.name == '') {
+		if (window.title_update !== undefined)
+			window.title_update();
+	}
+	else if (window.text_update !== undefined)
+		window.text_update();
+	else if (window.update !== undefined)
+		window.update();
+} // }}}
+
+function _chat(event) { // {{{
+	if (event.keyCode != 13)
+		return;
+	var text = event.target.value;
+	event.target.value = '';
+	if (text != '')
+		game('admin', 'chat', text);
+} // }}}
+
+function chat(source, message) { // {{{
+	var p = _chatter.AddElement('p');
+	if (source !== null) {
+		var span = p.AddElement('span');
+		if (typeof(source) == 'string')
+			span.AddText(source);
+		else {
+			span.AddText(Public.players[source].name);
+			span.style.color = playercolor(source);
+		}
+		p.AddText(': ');
+	}
+	var parts = message.split('\n');
+	for (var i = 0; i < parts.length - 1; ++i) {
+		p.AddText(parts[i]);
+		p.AddElement('br');
+		p.AddElement('span', 'spacer');
+	}
+	p.AddText(parts[parts.length - 1]);
+	p.scrollIntoView();
 } // }}}
 
 // }}}

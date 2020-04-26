@@ -3,3 +3,7 @@ html/mgrl.js
 example/quarto/__pycache__/
 example/quarto/webgame.py
 __pycache__/
+po/*~
+po.js/*~
+po/webgame.pot
+po.js/webgame.pot

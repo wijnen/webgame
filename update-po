@@ -1,0 +1,31 @@
+#!/bin/sh
+
+#This script only creates and updates the system files.
+
+cd "`dirname "$0"`"
+
+# Create javscript pot
+grep "class='translate'" html/webgame.html \
+	| cut -f2 -d'>' \
+	| cut -f1 -d'<' \
+	| sed 's/"/\\\\"/g' \
+	| sed 's/&lt;/</g' \
+	| sed 's/&gt;/>/g' \
+	| sed 's/&amp;/\&/g' \
+	| while read line ; do
+		echo 'console.info(_("'"$line"'"));'
+	done \
+	| xgettext --add-comments -LJavaScript - html/webgame.js -o po/javascript.pot
+
+# Create python pot
+xgettext --add-comments -LPython game webgame_client.py -o po/python.pot
+
+# Merge pot files
+msgcat po/javascript.pot po/python.pot -o po/webgame.pot
+
+# Update translations.
+for lang in po/*.po ; do
+	msgmerge --update "$lang" po/webgame.pot
+done
+
+rm po/javascript.pot po/python.pot po/webgame.pot

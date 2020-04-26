@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset='utf-8'/>
+		<title class="translate"></title>
+		<script src='gl-matrix.js'></script>
+		<script src='mgrl.js'></script>
+		<script src='rpc.js'></script>
+		<script src='builders.js'></script>
+		<script src='webgame.js'></script>
+		<link rel='stylesheet' href='webgame.css'/>
+	</head>
+	<body class='disconnected'>
+		<input type='checkbox' id='sidebarbutton'>
+		<div id='sidebar'>
+			<p id='sidebarhider'>
+				<label for='sidebarbutton'>
+					<span id='sidebarhide'>&lt;&lt;</span>
+					<span id='sidebarshow'>&gt;&gt;</span>
+				</label>
+			</p>
+			<h3 class='translate'>Personal</h3>
+			<p>
+				<span class='translate'>Your name:</span>
+				<input type='text' id='playername' onchange='_change_name()'/>
+			</p>
+			<p>
+				<span class='translate'>Set language to</span>
+				<select id='language_select' onchange='_select_language();'>
+				</select>
+			</p>
+			<div id='game'>
+				<hr/>
+				<h3 class='translate'>Game</h3>
+				<p>
+					Owner: <span id='owner'></span>
+					<span id='noowner' class='translate'>None</span>
+					<button id='claim' type='button' onclick='game("admin", "claim")' class='translate'>Claim</button>
+					<button id='release' type='button' onclick='game("admin", "release")' class='translate'>Release</button>
+				</p>
+				<button id='leave' type='button' onclick='game("admin", "leave")' class='translate'>Leave</button>
+				<h4 class='translate'>Players</h4>
+				<table id='players'></table>
+			</div>
+		</div>
+		<div id='vdiv'>
+			<div id='main'>
+				<div id='title'>
+					<h1 id='game_title' class="translate"></h1>
+					<div id='titleselection'>
+						<h2 class='translate'>Running Games</h2>
+						<p>
+							<select id='title_games'></select>
+							<button type='button' onclick="_title_join()" class='translate'>Join</button>
+							<button type='button' onclick="_title_view()" class='translate'>Watch</button>
+							<span id='title_status'></span>
+						</p>
+					</div>
+					<h2 class='translate'>Create New Game</h2>
+					<p>
+						<button type='button' onclick="_title_new()" class='translate'>Create New Game</button>
+						<span class='translate'>Name of the new game:</span>
+						<input type='text' id='title_game_name'/>
+						<span id='numplayers'>
+							<span class='translate'>Number of players:</span>
+							<input type='text' name='num_players' id='title_num_players'/><span id='range'></span>
+						</span>
+					</p>
+				</div>
+				<div id='notitle' class='hidden'>
+					<canvas id='canvas' width='1200' height='600'></canvas>
+				</div>
+			</div>
+			<div id='chat'>
+				<button type='button' onclick='game("admin", "next")' id='next' class='translate'>Next</button>
+				<div id='chatter'></div>
+				<input type='text' onkeydown='_chat(event)'/>
+			</div>
+		</div>
+		<div id='footer'>
+			<span id='state'></span>
+		</div>
+	</body>
+</html>

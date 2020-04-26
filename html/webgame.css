@@ -2,50 +2,89 @@
 	overflow: hidden;
 }
 
-body.disconnected {
-	background: red;
+#next {
+	display: none;
 }
 
-.start {
-	background: red;
+body.demo > div#vdiv > div#chat > button#next {
+	display: block;
+	z-index: 1;
 }
 
-.running .start {
-	background: green;
+body {
+	--width: 80%;
 }
 
-.icon {
-	width: 1em;
-	height: 1em;
+#vdiv {
+	position: fixed;
+	background: #444;
+	top: 0px;
+	bottom: 0px;
+	left: 0px;
+	right: 0px;
 }
 
-#state {
+#main {
+	position: fixed;
+	top: 0px;
+	left: 0px;
+	bottom: 0px;
+	width: var(--width);
+	background: #fff
+}
+
+#chat {
+	position: absolute;
+	overflow: auto;
+	top: 0px;
+	right: 0px;
+	bottom: 0px;
+	left: calc(var(--width) + 1ex);
+	background: #ee7;
+}
+
+#chatter {
+	position: absolute;
+	max-height: calc(100% - 3em);
+	overflow: auto;
+	left: 0px;
+	right: 0px;
+	bottom: 1.5em;
+	box-sizing: border-box;
+	padding: 1ex;
+	z-index: 0;
+}
+
+#chat > input {
+	position: absolute;
+	bottom: 0px;
+	left: 0px;
+	right: 0px;
+	box-sizing: border-box;
+	width: 100%;
 }
 
 #notitle {
-	position: fixed;
+	position: absolute;
 	left: 0px;
 	right: 0px;
 	top: 0px;
 	bottom: 0px;
 	text-align: center;
-}
-
-#connections {
-	clear: both;
+	z-index: 1;
 }
 
 #footer {
 	position: fixed;
 	bottom: 0px;
-	width: 95%;
-	left: 2.5%;
+	width: calc(var(--width) - 5%);
 	text-align: center;
+	left: 2.5%;
 	z-index: 2000;
 }
 
 #canvas {
-	position: fixed;
+	position: absolute;
 	left: 0px;
 	right: 0px;
 	top: 0px;
@@ -60,24 +99,95 @@ body.disconnected {
 	display: none;
 }
 
-#leave {
-	float: right;
-}
-
 #name {
 	float: left;
 }
 
-#players {
-	position: fixed;
-	bottom: 2em;
-	width: 95%;
+.icon {
+	border-radius: 1em;
+	width: 1em;
+	height: 1em;
 }
 
-#players span {
-	margin: 0px 2em;
+.spacer {
+	display: inline-block;
+	width: 3em;
+}
+
+:root {
+	--sidewidth: 25em;
+	--extra: 3em;
+	--sidecolor: #dfd;
+}
+
+#game {
+	background: var(--sidecolor);
+}
+
+#players {
+	width: calc(var(--sidewidth) - var(--extra) - 2em);
+}
+
+#players > tr > td {
+	max-width: 99%;
+}
+
+#players > tr > td.kick {
+	width: 4em;
 }
 
 #title_num_players {
 	width: 3em;
+}
+
+#sidebarbutton {
+	display: none;
+}
+
+#sidebarhider {
+	float: right;
+	border-radius: 1ex;
+	margin-right: calc(var(--extra) * -1 - 1em);
+	padding: 1em;
+	background: var(--sidecolor);
+}
+
+#sidebar {
+	border-radius: 1ex;
+	z-index: 2000;
+	position: absolute;
+	width: calc(var(--sidewidth) - 2em - var(--extra));
+	transition: left 1s;
+	background: var(--sidecolor);
+	padding: 1em;
+	left: 1ex;
+}
+
+#sidebarbutton:checked ~ #sidebar {
+	left: calc(var(--sidewidth) * -1 + var(--extra));
+}
+
+body.disconnected > #sidebar, body.disconnected > div > #sidebarhider {
+	background: red;
+}
+
+#title {
+	position: absolute;
+	overflow: auto;
+	left: calc(var(--sidewidth) + 1em + 1ex);
+	right: 0px;
+	transition: left 1s;
+}
+
+#sidebarbutton:checked ~ div > div > #title {
+	left: calc(var(--extra) + 1em);
+}
+
+#sidebarhide, #sidebarshow {
+	display: inline;
+}
+
+#sidebarbutton:checked ~ div > p > label > #sidebarhide,
+#sidebarbutton:not(:checked) ~ div > p > label > #sidebarshow {
+	display: none;
 }

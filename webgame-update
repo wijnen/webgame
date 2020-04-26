@@ -6,15 +6,17 @@ Always:
 
 With argument(s):
 	Create po files for languages that are specified (for client and js).
-
-See header of update-pot for explanation of structure.
 '''
 
 import fhs
 import sys
+import os
 import subprocess
+import time
 
 fhs.option('name', 'game name')
+fhs.option('copyright', 'copyright holder for generated files', default = 'Bas Wijnen <wijnen@debian.org>')
+fhs.option('bugs', 'bug reporting address', default = 'wijnen@debian.org')
 config = fhs.init(help = 'Update or install translation files for a webgame', version = '0.1', contact = 'Bas Wijnen <wijnen@debian.org>', game = True)
 
 def run(cmd, input = None):
@@ -23,25 +25,43 @@ def run(cmd, input = None):
 	else:
 		return subprocess.run(cmd, shell = True, close_fds = True, input = input, stdout = subprocess.PIPE).stdout
 
-pot = {}
+year = time.strftime('%Y').encode('utf-8')
+date = time.strftime('%F %H:%M%z').encode('utf-8')
+
+def xgettext(args, input = None):
+	return run ("xgettext --add-comments --from-code UTF-8 --package-name '" +
+			name.replace("'", r"\'") +
+			"' --msgid-bugs-address " + config['bugs'] + ' ' +
+			args, input) \
+		.replace(b'\n"Content-Type: text/plain; charset=CHARSET\\n"\n', b'\n"Content-Type: text/plain; charset=UTF-8\\n"\n') \
+		.replace(b'\n# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.\n', b'\n# ' + config['copyright'].encode('utf-8') + b', ' + year + b'.\n') \
+		.replace(b"\n# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER\n", b'\n# Copyright (C) ' + year + b' ' + config['copyright'].encode('utf-8') + b'\n') \
+		.replace(b'\n"Last-Translator: FULL NAME <EMAIL@ADDRESS>\\n"\n', b'\n"Last-Translator: ' + config['copyright'].encode('utf-8') + b'\\n"\n') \
+		.replace(b'\n"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n"\n', b'\n"PO-Revision-Date: ' + date + b'\\n"\n')
+
 # Create pot into a variable.
+name = config['name'] or os.path.basename(os.path.abspath(os.curdir)).capitalize()
 gpyfiles = [x for x in os.listdir('.') if x.endswith('.gpy')]
-files = [x for x in os.listdir('.') if x.endswith('.py') or x == 'ai']
-if len(files) > 0:
-	pot['po'] = run('xgettext -L Python ' + ' '.join(gpyfiles + files) + ' -o -')
+pyfiles = [x for x in os.listdir('.') if x.endswith('.py') or x == 'ai']
+jsfiles = [os.path.join('html', x) for x in os.listdir('html') if x.endswith('.js')]
+pypot = xgettext('-L Python ' + ' '.join(gpyfiles + pyfiles) + ' -o -')
+jspot = xgettext("-L JavaScript - " + ' '.join(jsfiles) + ' -o -', ('// The language name of the translation, for the dropdown selection\nconsole.info(_("' + name.replace('"', '\\"') + '"), _("Language Name"));').encode('utf-8'))
+with fhs.write_temp(text = False) as tmp:
+	tmp.write(pypot)
+	tmp.flush()
+	pot = run('msgcat - %s -o-' % tmp.filename, jspot)
 
-name = config['name'] or os.path.dirname(os.path.abspath(os.curdir)).capitalize()
-files = [x for x in os.listdir('.') if x.endswith('.js')]
-pot['po.js'] = run('xgettext -L JavaScript - ' + ' '.join(files) + ' -o -', 'console.info(_("' + name.replace('"', '\\"') + '"));')
+# Run msgmerge for each translation
+for f in os.listdir('po'):
+	if not f.endswith('.po'):
+		continue
+	run('msgmerge --quiet --lang %s -U %s -' % (os.path.splitext(f)[0], os.path.join('po', f)), pot)
 
-for type in ('po', 'po.js'):
-	# Run msgmerge for each translation
-	for f in os.listdir(type):
-		if not f.endswith('.po'):
-			continue
-		run('msgmerge -U %s -' % os.path.join(type, f), pot[type])
-	# Store pot for each argument, if it doesn't exist yet
-	for a in sys.argv[1:]:
-		f = os.path.join(type, a + '.po')
-		if not os.path.exists(f):
-			open(f, 'w').write(pot[type])
+# Store pot for each argument, if it doesn't exist yet
+for lang in sys.argv[1:]:
+	f = os.path.join('po', lang + '.po')
+	if not os.path.exists(f):
+		open(f, 'wb').write(pot \
+			.replace(b'\n"Language-Team: LANGUAGE <LL@li.org>\\n"\n', b'\n"Language-Team: ' + lang.encode('utf-8') + b' <' + lang.encode('utf-8') + b'@li.org>\\n"\n') \
+			.replace(b'\n"Language: \\n"\n', b'\n"Language: ' + lang.encode('utf-8') + b'\\n"\n') \
+			.replace(b'# SOME DESCRIPTIVE TITLE.\n', b'# Translation of ' + name.encode('utf-8') + b' for ' + lang.encode('utf-8') + b'\n'))
