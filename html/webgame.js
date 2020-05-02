@@ -39,23 +39,36 @@ function title_make_option(select, game, n) { // {{{
 // Functions and variables which can be used by user code. {{{
 
 var Public, Private;	// Shared data.
-var title_gamelist = [];	// Games which are available in the title screen.
-var title_select;	// Select element on title screen (for changing style).
-var server;	// Remote server connection.
-var audio;	// Object with all registered audio files as its members.
+var audio;	// Object with play/stop functions for all registered audio files as its members.
 var my_name = null;	// Player name, as returned by the server.
 var my_num = null;	// Player number of me, or null if not playing.
+// Lesser used options are in the "webgame" object, to prevent namespace pollution.
+var webgame = {
+	title_gamelist: [],	// Games which are available in the title screen.
+	title_select: undefined	// Select element on title screen (for changing style).
+};
+
+function game(target) { // {{{
+	var args = [];
+	for (var i = 1; i < arguments.length; ++i)
+		args.push(arguments[i]);
+	_webgame.server.call(target, args, {}, _webgame.server_reply);
+} // }}}
+
+function set_state(value) { // {{{
+	_webgame.state.ClearAll().AddText(value);
+} // }}}
 
 function _(message, force_args) {	// Support for translations. {{{
-	if (_translations !== undefined) {
-		if (_translations[_language] !== undefined && _translations[_language][message] !== undefined)
-			message = _translations[_language][message];
+	if (_webgame.translations !== undefined) {
+		if (_webgame.translations[_webgame.language] !== undefined && _webgame.translations[_webgame.language][message] !== undefined)
+			message = _webgame.translations[_webgame.language][message];
 		else {
-			// _languages is a list of languages, sorted by user preference.
-			for (var t = 0; t < _languages; ++t) {
-				l = _languages[t];
-				if (_translations[t] !== undefined && _translations[t][message] !== undefined) {
-					message = _translations[t][message];
+			// _webgame.languages is a list of languages, sorted by user preference.
+			for (var t = 0; t < _webgame.languages; ++t) {
+				l = _webgame.languages[t];
+				if (_webgame.translations[t] !== undefined && _webgame.translations[t][message] !== undefined) {
+					message = _webgame.translations[t][message];
 					break;
 				}
 			}
@@ -99,7 +112,7 @@ function watch(path, cb) { // {{{
 	if (path[0] != 'Public' && path[0] != 'Private')
 		console.error(_('Ignoring invalid watch path $1, must start with Public or Private')(path));
 	else
-		_watchlist.push([path, cb]);
+		_webgame.watchlist.push([path, cb]);
 } // }}}
 
 function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
@@ -170,7 +183,7 @@ function new_canvas(w, h, redraw, parent) { // {{{
 		if (redraw)
 			redraw(node);
 	};
-	_canvas_list.push(node.canvas);
+	_webgame.canvas_list.push(node.canvas);
 	node.canvas.AddEvent('click', function(event) {
 		if (!node.selectable)
 			return;
@@ -184,7 +197,7 @@ function new_canvas(w, h, redraw, parent) { // {{{
 } // }}}
 
 function del_canvas(node) { // {{{
-	_canvas_list.splice(_canvas_list.indexOf(node.canvas), 1);
+	_webgame.canvas_list.splice(_webgame.canvas_list.indexOf(node.canvas), 1);
 	graph.remove(node);
 	please.overlay.remove_element(node.div);
 } // }}}
@@ -203,7 +216,7 @@ function new_div(w, h, pw, ph, redraw, parent) { // {{{
 		if (redraw)
 			redraw(node);
 	};
-	_div_list.push(div);
+	_webgame.div_list.push(div);
 	div.AddEvent('click', function(event) {
 		if (!node.selectable)
 			return;
@@ -214,7 +227,7 @@ function new_div(w, h, pw, ph, redraw, parent) { // {{{
 } // }}}
 
 function del_div(node) { // {{{
-	_div_list.splice(_div_list.indexOf(node.div), 1);
+	_webgame.div_list.splice(_webgame.div_list.indexOf(node.div), 1);
 	graph.remove(node);
 	please.overlay.remove_element(node.div);
 } // }}}
@@ -222,6 +235,15 @@ function del_div(node) { // {{{
 function pos_from_event(event) { // {{{
 	var pos = please.dom.pos_from_event(event.clientX, event.clientY);
 	return [pos[0] + window.camera.location_x, pos[1] + window.camera.location_y];
+} // }}}
+
+function move_node(node, dst, time, callback) { // {{{
+	var src = node.location;
+	node.location = please.path_driver(please.linear_path(src, dst), time, false, false, function() {
+		node.location = dst;
+		if (callback !== undefined)
+			callback();
+	});
 } // }}}
 
 function edit_texture(instance, tname, editor) { // {{{
@@ -246,48 +268,40 @@ function player_texture(instance, num) { // {{{
 	return instance;
 } // }}}
 
+function send_chat(message) { // {{{
+	game('webgame', 'chat', message);
+} // }}}
+
+function show_chat(source, message) { // {{{
+	var p = _webgame.chatter.AddElement('p');
+	if (source !== null) {
+		var span = p.AddElement('span');
+		if (typeof(source) == 'string')
+			span.AddText(source);
+		else {
+			span.AddText(Public.players[source].name);
+			span.style.color = playercolor(source);
+		}
+		p.AddText(': ');
+	}
+	var parts = message.split('\n');
+	for (var i = 0; i < parts.length - 1; ++i) {
+		p.AddText(parts[i]);
+		p.AddElement('br');
+		p.AddElement('span', 'spacer');
+	}
+	p.AddText(parts[parts.length - 1]);
+	p.scrollIntoView();
+}
+// }}}
 // }}}
 
 // Internal variables and functions. {{{
+// Global variables for internal use are all inside one object to prevent namespace pollution.
+var _webgame = { playerrows: [], watchlist: [], canvas_list: [], div_list: [], translations: {}, chat: show_chat };
 
-// Global variables. {{{
-var _body, _state, _titlescreen, _mainscreen, _footer, _title_selection, _canvas, _game, _owner, _noowner, _claim, _release, _players, _vdiv, _chatter;
-var _gametitle;
-var _audio;
-var _playerrows = [];
-var _watchlist = [];
-var _canvas_list = [];
-var _div_list = [];
-var _translations = {};
-var _languages, _language;
-// }}}
-
-function _update_url() { // {{{
-	if (my_name === undefined)
-		return;
-	var lang;
-	if (_language === undefined)
-		lang = '';
-	else
-		lang = '&lang=' + encodeURIComponent(_language);
-	history.replaceState(null, document.title, document.location.protocol + '//' + document.location.host + '/?name=' + encodeURIComponent(my_name) + lang);
-} // }}}
-
-function _set_language(language) { // {{{
-	if (language == '')
-		language = undefined;
-	else if (_translations[language] === undefined) {
-		console.error(_('Attempting to set undefined language $1')(language));
-		return;
-	}
-	_language = language;
-	for (var e in _translatable)
-		for (var k = 0; k < _translatable[e].length; ++k)
-			_translatable[e][k].ClearAll().AddText(_(e));
-	_update_url();
-} // }}}
-
-AddEvent('load', function() { // {{{
+// System initialization.
+window.AddEvent('load', function() { // {{{
 	var xhr = new XMLHttpRequest();
 	xhr.AddEvent('loadend', function() {
 		var lines = xhr.responseText.split('\n');
@@ -358,24 +372,24 @@ AddEvent('load', function() { // {{{
 			for (var i = 0; i < paths.length; ++i)
 				please.set_search_path(paths[i], 'webgame/' + paths[i]);
 			// Set up audio system.
-			// _audio is an object with the audio data for all the files.
-			// _audio is a flat object. Keys of _audio are filenames.
-			// audio has members which are functions to call play on _audio members.
+			// _webgame.audio is an object with the audio data for all the files.
+			// _webgame.audio is a flat object. Keys of _webgame.audio are filenames.
+			// audio has members which are functions to call play on _webgame.audio members.
 			// audio is not flat. Subdirectories are separate objects in audio.
-			// Example: _audio['sfx/bang.wav'] can be played with audio.sfx.bang().
+			// Example: _webgame.audio['sfx/bang.wav'] can be played with audio.sfx.bang().
 			// Because the files have not yet been loaded here,
-			// _audio is filled with filename keys, but values are path lists like ['sfx', 'bang'], not audio data.
+			// _webgame.audio is filled with filename keys, but values are path lists like ['sfx', 'bang'], not audio data.
 			// audio is not set up yet.
-			_audio = {};
+			_webgame.audio = {};
 			audio = {};
 			var list = load[use_3d ? 1 : 0];
 			if (list.length > 0) {
 				for (var f = 0; f < list.length; ++f) {
-					console.info('loading', list[f]);
+					//console.info('loading', list[f]);
 					please.load(list[f]);
 					var ext = list[f].substr(-4);
 					if (ext == '.ogg' || ext == '.wav' || ext == '.mp3')
-						_audio[list[f]] = list[f].substr(0, list[f].length - 4).split('/');
+						_webgame.audio[list[f]] = list[f].substr(0, list[f].length - 4).split('/');
 				}
 			}
 			else
@@ -389,98 +403,12 @@ AddEvent('load', function() { // {{{
 	xhr.send();
 }); // }}}
 
-function _id(name, num) { // {{{
-	my_name = name;
-	my_num = num;
-	_update_url();
-} // }}}
-
-function _webgame_init(languages) { // {{{
-	// Set up language select.
-	var have_languages = [];
-	for (var language in _translations)
-		have_languages.push(language);
-	have_languages.sort();
-	_languages = [];
-	outer: for (var l = 0; l < languages.length; ++l) {
-		var test = [function(a, b) { return a == b; }, function(a, b) { return a[0] + a[1] == b[0] + b[1]; }];
-		for (var t = 0; t < test.length; ++t) {
-			for (var candidate = 0; candidate < have_languages.length; ++candidate) {
-				if (test[t](languages[l], have_languages[candidate])) {
-					_languages.push(have_languages[candidate]);
-					have_languages.splice(candidate, 1);
-					continue outer;
-				}
-			}
-		}
-	}
-	_languages.push('');
-	for (var l = 0; l < have_languages.length; ++l)
-		_languages.push(have_languages[l]);
-	var select = document.getElementById('language_select');
-	if (_languages.length == 0)
-		select.AddClass('hidden');
-	else {
-		for (var e in _languages) {
-			if (_languages[e] == '') {
-				var option = select.AddElement('option').AddText('English (source code)');
-				option.value = '';
-			}
-			else {
-				var translation = _translations[_languages[e]];
-				var name = translation['Language Name'];
-				select.AddElement('option').AddText(name + ' (' + _languages[e] + ')').value = _languages[e];
-			}
-		}
-	}
-	_set_language(_languages[0]);
-	document.getElementById('title_game_name').value = _("$1's game")(my_name);
-	document.getElementById('playername').value = my_name;
-	_gametitle = document.title;
-	_titlescreen = document.getElementById('title');
-	_mainscreen = document.getElementById('notitle');
-	_footer = document.getElementById('footer');
-	_title_selection = document.getElementById('titleselection');
-	title_select = document.getElementById('title_games');
-	_canvas = document.getElementById('canvas');
-	_game = document.getElementById('game');
-	_owner = document.getElementById('owner');
-	_noowner = document.getElementById('noowner');
-	_claim = document.getElementById('claim');
-	_release = document.getElementById('release');
-	_players = document.getElementById('players');
-	_vdiv = document.getElementById('vdiv');
-	_chatter = document.getElementById('chatter');
-	_vdiv.AddEvent('mousedown', _resize_chat);
-	_game.AddClass('hidden');
-} // }}}
-
-function _resize_chat(event) { // {{{
-	document.AddEvent('mouseup', up).AddEvent('mousemove', move);
-	var x = event.clientX;
-	function up() {
-		event.stopPropagation();
-		document.RemoveEvent('mouseup', up).RemoveEvent('mousemove', move);
-	}
-	function move(event) {
-		event.stopPropagation();
-		var diff = (event.clientX - x) / _body.clientWidth;
-		var value = window.getComputedStyle(_body).getPropertyValue('--width');
-		var current_f = Number(value.substr(0, value.length - 1)) / 100;
-		_body.style.setProperty('--width', (current_f + diff) * 100 + '%');
-		x = event.clientX;
-		_resize_window();
-		event.preventDefault();
-		return false;
-	}
-} // }}}
-
-AddEvent('mgrl_media_ready', please.once(function() { // {{{
+window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	window.graph = new please.SceneGraph();
 	window.camera = new please.CameraNode();
 	graph.add(window.camera);
 	graph.camera = window.camera;
-	if (use_3d) {
+	if (use_3d) { // {{{
 		var prog = please.glsl('default', 'simple.vert', 'diffuse.frag');
 		prog.activate();
 		please.set_clear_color(0, 0, 0, 0);
@@ -559,7 +487,7 @@ AddEvent('mgrl_media_ready', please.once(function() { // {{{
 			});
 		}
 		please.set_viewport(renderer);
-	}
+	} // }}}
 	else {
 		window.camera.look_at = function() { return [window.camera.location_x, window.camera.location_y, 0]; };
 		window.camera.location = function() { return [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 100]; };
@@ -568,31 +496,31 @@ AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	window.camera.update_camera();
 
 	// Finish setting up audio system.
-	for (var a in _audio) {
-		var path = _audio[a];
+	for (var a in _webgame.audio) {
+		var path = _webgame.audio[a];
 		var obj = audio;
 		for (var p = 0; p < path.length - 1; ++p) {
 			if (obj[path[p]] === undefined)
 				obj[path[p]] = {}
 			obj = obj[path[p]];
 		}
-		_audio[a] = please.access(a);
+		_webgame.audio[a] = please.access(a);
 		(function(a) {	// This function creates a private copy of a for each iteration.
 			obj[path[path.length - 1]] = function(loop) {
-				_audio[a].loop = loop === true;
+				_webgame.audio[a].loop = loop === true;
 				if (loop === null)
-					_audio[a].stop();
+					_webgame.audio[a].stop();
 				else if (loop !== false) {
-					_audio[a].currentTime = 0;
-					_audio[a].play();
+					_webgame.audio[a].currentTime = 0;
+					_webgame.audio[a].play();
 				}
 			};
 		})(a);
 	}
 
 	// Initialize game data.
-	_body = document.getElementsByTagName('body')[0];
-	_state = document.getElementById('state');
+	_webgame.body = document.getElementsByTagName('body')[0];
+	_webgame.state = document.getElementById('state');
 	// Set up translations.
 	_translatable = {};
 	var elements = document.getElementsByClassName('translate');
@@ -606,72 +534,138 @@ AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	Private = { state: '' };
 	set_state('');
 	var messages = {
-		webgame_init: _webgame_init,
-		id: _id,
-		Public_update: _Public_update,
-		Private_update: _Private_update,
+		webgame: function(target, arg1, arg2) {
+			_webgame[target](arg1, arg2);
+		},
 		'': function() {
 			var name = arguments[0];
 			var args = [];
 			for (var a = 1; a < arguments.length; ++a)
 				args.push(arguments[a]);
+			//console.info('calling', name, args);
 			window[name].apply(window, args);
 		}
 	};
-	server = Rpc(messages,
-		function() { _body.RemoveClass('disconnected'); },
-		function() { _body.AddClass('disconnected'); });
+	_webgame.server = Rpc(messages,
+		function() { _webgame.body.RemoveClass('disconnected'); },
+		function() { _webgame.body.AddClass('disconnected'); });
 
-	window.AddEvent('resize', _resize_window);
+	window.AddEvent('resize', _webgame.resize_window);
 	if (!use_3d && window.init_2d !== undefined) window.init_2d();
 	if (use_3d && window.init_3d !== undefined) window.init_3d();
 	if (window.init !== undefined) window.init();
 })); // }}}
 
-function _server_reply() { // {{{
+// System commands.
+_webgame.id = function(name, num) { // {{{
+	my_name = name;
+	my_num = num;
+	_webgame.update_url();
+} // }}}
+
+_webgame.init = function(languages) { // {{{
+	// Set up language select.
+	var have_languages = [];
+	for (var language in _webgame.translations)
+		have_languages.push(language);
+	have_languages.sort();
+	_webgame.languages = [];
+	outer: for (var l = 0; l < languages.length; ++l) {
+		var test = [function(a, b) { return a == b; }, function(a, b) { return a[0] + a[1] == b[0] + b[1]; }];
+		for (var t = 0; t < test.length; ++t) {
+			for (var candidate = 0; candidate < have_languages.length; ++candidate) {
+				if (test[t](languages[l], have_languages[candidate])) {
+					_webgame.languages.push(have_languages[candidate]);
+					have_languages.splice(candidate, 1);
+					continue outer;
+				}
+			}
+		}
+	}
+	_webgame.languages.push('');
+	for (var l = 0; l < have_languages.length; ++l)
+		_webgame.languages.push(have_languages[l]);
+	var select = document.getElementById('language_select');
+	if (_webgame.languages.length == 0)
+		select.AddClass('hidden');
+	else {
+		for (var e in _webgame.languages) {
+			if (_webgame.languages[e] == '') {
+				var option = select.AddElement('option').AddText('English (source code)');
+				option.value = '';
+			}
+			else {
+				var translation = _webgame.translations[_webgame.languages[e]];
+				var name = translation['Language Name'];
+				select.AddElement('option').AddText(name + ' (' + _webgame.languages[e] + ')').value = _webgame.languages[e];
+			}
+		}
+	}
+	_webgame.set_language(_webgame.languages[0]);
+	document.getElementById('title_game_name').value = _("$1's game")(my_name);
+	document.getElementById('playername').value = my_name;
+	_webgame.gametitle = document.title;
+	_webgame.titlescreen = document.getElementById('title');
+	_webgame.mainscreen = document.getElementById('notitle');
+	_webgame.footer = document.getElementById('footer');
+	_webgame.title_selection = document.getElementById('titleselection');
+	webgame.title_select = document.getElementById('title_games');
+	_webgame.canvas = document.getElementById('canvas');
+	_webgame.game = document.getElementById('game');
+	_webgame.owner = document.getElementById('owner');
+	_webgame.noowner = document.getElementById('noowner');
+	_webgame.claim = document.getElementById('claim');
+	_webgame.release = document.getElementById('release');
+	_webgame.players = document.getElementById('players');
+	_webgame.vdiv = document.getElementById('vdiv');
+	_webgame.chatter = document.getElementById('chatter');
+	_webgame.vdiv.AddEvent('mousedown', _webgame.resize_chat);
+	_webgame.game.AddClass('hidden');
+} // }}}
+
+_webgame.end = function(result) { // {{{
+	if (window.webgame_end !== undefined)
+		window.webgame_end(result);
+} // }}}
+
+_webgame.server_reply = function() { // {{{
 	if (window.reply !== undefined)
 		window.reply.apply(window.reply, arguments);
 	else if (arguments[0] !== null)
 		alert(_('Server replied: $1')(arguments[0]));
 } // }}}
 
-function game(target) { // {{{
-	var args = [];
-	for (var i = 1; i < arguments.length; ++i)
-		args.push(arguments[i]);
-	server.call(target, args, {}, _server_reply);
+// UI.
+_webgame.resize_chat = function(event) { // {{{
+	document.AddEvent('mouseup', up).AddEvent('mousemove', move);
+	var x = event.clientX;
+	function up() {
+		event.stopPropagation();
+		document.RemoveEvent('mouseup', up).RemoveEvent('mousemove', move);
+	}
+	function move(event) {
+		event.stopPropagation();
+		var diff = (event.clientX - x) / _webgame.body.clientWidth;
+		var value = window.getComputedStyle(_webgame.body).getPropertyValue('--width');
+		var current_f = Number(value.substr(0, value.length - 1)) / 100;
+		_webgame.body.style.setProperty('--width', (current_f + diff) * 100 + '%');
+		x = event.clientX;
+		_webgame.resize_window();
+		event.preventDefault();
+		return false;
+	}
 } // }}}
 
 AddEvent('mgrl_dom_context_changed', function() { // {{{
-	if (window.update_canvas && !use_3d)
+	if (window.update_canvas !== undefined && !use_3d)
 		window.update_canvas(please.dom.context);
 }); // }}}
 
-function _title_join() { // {{{
-	var which = title_select.options[title_select.selectedIndex].value;
-	game('join', which);
-} // }}}
-
-function _title_view() { // {{{
-	var which = title_select.options[title_select.selectedIndex].value;
-	game('view', which);
-} // }}}
-
-function _title_new() { // {{{
-	var gamename = document.getElementById('title_game_name').value;
-	var num_players = Number(document.getElementById('title_num_players').value);
-	game('new', gamename, num_players);
-} // }}}
-
-function set_state(value) { // {{{
-	_state.ClearAll().AddText(value);
-} // }}}
-
-function _resize_window() { // {{{
-	var size = [_mainscreen.clientWidth, _mainscreen.clientHeight];
+_webgame.resize_window = function() { // {{{
+	var size = [_webgame.mainscreen.clientWidth, _webgame.mainscreen.clientHeight];
 	if (size[0] == 0 || size[1] == 0)
 		return;
-	if (_canvas.width != size[0] || _canvas.height != size[1]) {
+	if (_webgame.canvas.width != size[0] || _webgame.canvas.height != size[1]) {
 		if (use_3d) {
 			var max = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
 			if (size[0] > max) {
@@ -683,10 +677,10 @@ function _resize_window() { // {{{
 				//console.info('change size', size);
 			}
 		}
-		_canvas.width = size[0];
-		_canvas.height = size[1];
-		window.camera.width = _canvas.width;
-		window.camera.height = _canvas.height;
+		_webgame.canvas.width = size[0];
+		_webgame.canvas.height = size[1];
+		window.camera.width = _webgame.canvas.width;
+		window.camera.height = _webgame.canvas.height;
 		if (use_3d)
 			gl.viewport(0, 0, size[0], size[1]);
 		else {
@@ -706,10 +700,10 @@ function _resize_window() { // {{{
 } // }}}
 
 window.AddEvent('mgrl_overlay_aligned', function() { // {{{
-	for (var c = 0; c < _canvas_list.length; ++c)
-		_canvas_list[c].redraw_func();
-	for (var d = 0; d < _div_list.length; ++d)
-		_div_list[d].redraw_func();
+	for (var c = 0; c < _webgame.canvas_list.length; ++c)
+		_webgame.canvas_list[c].redraw_func();
+	for (var d = 0; d < _webgame.div_list.length; ++d)
+		_webgame.div_list[d].redraw_func();
 }); // }}}
 
 window.AddEvent('mgrl_dom_context_changed', function() { // {{{
@@ -721,77 +715,90 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 	please.dom.context.fill();
 	if (window.camera !== undefined)
 		please.dom.context.translate(-window.camera.location_x, -window.camera.location_y);
-	if (window.update_canvas && !use_3d)
+	if (window.update_canvas !== undefined && !use_3d)
 		window.update_canvas(please.dom.context);
 }); // }}}
 
-function _update(is_public, path, value) { // {{{
-	var top = (is_public ? Public : Private);
-	// Find watched items.
-	var watch = [];
-	outer: for (var w = 0; w < _watchlist.length; ++w) {
-		var watch_path = _watchlist[w][0];
-		if ((watch_path[0] == 'Public') ^ is_public) {
-			continue;
-		}
-		for (var i = 0; i < path.length && i < watch_path.length - 1; ++i) {
-			if (watch_path[i + 1] != path[i]) {
-				continue outer;
-			}
-		}
-		// Get current value.
-		var target = top;
-		for (var i = 1; i < watch_path.length; ++i) {
-			target = target[watch_path[i]];
-			if (target === undefined)
-				break;
-		}
-		watch.push([watch_path, _watchlist[w][1], _deepcopy(target)]);
+_webgame.set_language = function(language) { // {{{
+	if (language == '')
+		language = undefined;
+	else if (_webgame.translations[language] === undefined) {
+		console.error(_('Attempting to set undefined language $1')(language));
+		return;
 	}
-	// Update the data.
-	if (path.length > 0) {
-		var target = top;
-		for (var i = 0; i < path.length - 1; ++i)
-			target = target[path[i]];
-		var key = path[path.length - 1];
-		if (value !== undefined)
-			target[key] = value;
-		else {
-			delete target[key];
-			if (target instanceof Array) {
-				while (target[target.length - 1] === undefined)
-					target.length -= 1;
-			}
-		}
-	}
-	else if (is_public)
-		Public = value;
-	else
-		Private = value;
-	// Fire watch events.
-	for (var w = 0; w < watch.length; ++w) {
-		p = watch[w][0];
-		cb = watch[w][1];
-		old = watch[w][2];
-		var target = (is_public ? Public : Private);
-		for (var i = 1; i < p.length; ++i) {
-			target = target[p[i]];
-			if (target === undefined)
-				break;
-		}
-		if (old != target)
-			cb(target, old, p);
-	}
+	_webgame.language = language;
+	for (var e in _translatable)
+		for (var k = 0; k < _translatable[e].length; ++k)
+			_translatable[e][k].ClearAll().AddText(_(e));
+	_webgame.update_url();
 } // }}}
 
-function _Public_update(path, value) { // {{{
-	//console.info('update', path, value);
-	var oldname = Public.name;
-	_update(true, path, value);
+_webgame.select_language = function() { // {{{
+	var lang = document.getElementById('language_select').value;
+	_webgame.set_language(lang);
+	if (Public === undefined || Public.name === undefined)
+		return;
+	if (Public.name == '') {
+		if (window.title_update !== undefined)
+			window.title_update();
+	}
+	else if (window.text_update !== undefined)
+		window.text_update();
+	else if (window.update !== undefined)
+		window.update();
+} // }}}
+
+_webgame.chat_event = function(event) { // {{{
+	if (event.keyCode != 13)
+		return;
+	var text = event.target.value;
+	event.target.value = '';
+	if (text != '')
+		send_chat(text);
+} // }}}
+
+_webgame.change_name = function() { // {{{
+	var name = document.getElementById('playername').value;
+	game('webgame', 'name', name);
+} // }}}
+
+// Commands triggered from buttons on website.
+_webgame.title_join = function() { // {{{
+	var which = webgame.title_select.options[webgame.title_select.selectedIndex].value;
+	game('join', which);
+} // }}}
+
+_webgame.title_view = function() { // {{{
+	var which = webgame.title_select.options[webgame.title_select.selectedIndex].value;
+	game('view', which);
+} // }}}
+
+_webgame.title_new = function() { // {{{
+	var gamename = document.getElementById('title_game_name').value;
+	var num_players = Number(document.getElementById('title_num_players').value);
+	game('new', gamename, num_players);
+} // }}}
+
+// Shared object handling.
+_webgame.start = function() { // {{{
+	if (_webgame.transaction !== undefined)
+		console.error('received start command while transaction is in progress.');
+	else
+		_webgame.transaction = {Public: [_webgame.deepcopy(Public), []], Private: [_webgame.deepcopy(Private), []]};
+} // }}}
+
+_webgame.finish = function() { // {{{
+	if (_webgame.transaction === undefined) {
+		console.error('received finish command while transaction is not in progress.');
+		return;
+	}
+	var oldname = _webgame.transaction.Public[0].name;
+	var transaction = _webgame.transaction;
+	_webgame.transaction = undefined;
 	if (Public.name == '') {
 		// Title screen.
-		document.title = _gametitle;
-		_game.AddClass('hidden');
+		document.title = _webgame.gametitle;
+		_webgame.game.AddClass('hidden');
 		// Clean up old game.
 		if (oldname != '' && window.end_game !== undefined)
 			window.end_game();
@@ -820,45 +827,45 @@ function _Public_update(path, value) { // {{{
 		}
 		// Remove titles that aren't in the list.
 		var new_list = [];	// Remeber items that should remain in the list.
-		for (var g = 0; g < title_gamelist.length; ++g) {
+		for (var g = 0; g < webgame.title_gamelist.length; ++g) {
 			// Put each game that is in both old and remote lists also in the new list. Omit the rest.
 			for (var n = 0; n < games.length; ++n) {
-				if (games[n][0] == title_gamelist[g][0]) {
-					new_list.push(title_gamelist[g]);
+				if (games[n][0] == webgame.title_gamelist[g][0]) {
+					new_list.push(webgame.title_gamelist[g]);
 					break;
 				}
 			}
 		}
 		// Add titles that are in the list and remove the old ones from the Select element.
 		var current = 0;
-		title_gamelist = [];
+		webgame.title_gamelist = [];
 		for (var n = 0; n < games.length; ++n) {
 			// Remove games that are not in the new list from the selection.
-			while (current < new_list.length && n < title_select.options.length && new_list[current][0] != title_select.options[n].value)
-				title_select.removeChild(title_select.options[n]);
+			while (current < new_list.length && n < webgame.title_select.options.length && new_list[current][0] != webgame.title_select.options[n].value)
+				webgame.title_select.removeChild(webgame.title_select.options[n]);
 			// Add new games that aren't in the selection yet.
 			if (current < new_list.length && games[n][0] == new_list[current][0]) {
-				title_gamelist.push(new_list[current]);
+				webgame.title_gamelist.push(new_list[current]);
 				continue;
 			}
 			// Add games that were already in the selection.
-			title_gamelist.push([games[n][0], title_make_option(title_select, games[n], n)]);
+			webgame.title_gamelist.push([games[n][0], title_make_option(webgame.title_select, games[n], n)]);
 		}
 		// Remove games that have not been handled at the end of the list.
-		while (title_select.options.length > n)
-			title_select.removeChild(title_select.options[n]);
+		while (webgame.title_select.options.length > n)
+			webgame.title_select.removeChild(webgame.title_select.options[n]);
 		// Update all game info.
-		for (var n = 0; n < title_gamelist.length; ++n)
-			title_gamelist[n][1].update_players();
+		for (var n = 0; n < webgame.title_gamelist.length; ++n)
+			webgame.title_gamelist[n][1].update_players();
 		// Hide selection if it is empty.
-		if (title_gamelist.length == 0)
-			_title_selection.AddClass('hidden');
+		if (webgame.title_gamelist.length == 0)
+			_webgame.title_selection.AddClass('hidden');
 		else
-			_title_selection.RemoveClass('hidden');
+			_webgame.title_selection.RemoveClass('hidden');
 		// Show the titlescreen.
-		_titlescreen.RemoveClass('hidden');
-		_mainscreen.AddClass('hidden');
-		_footer.AddClass('hidden');
+		_webgame.titlescreen.RemoveClass('hidden');
+		_webgame.mainscreen.AddClass('hidden');
+		_webgame.footer.AddClass('hidden');
 		please.renderer.overlay.AddClass('hidden');
 		if (window.title_update !== undefined)
 			window.title_update();
@@ -866,44 +873,44 @@ function _Public_update(path, value) { // {{{
 	}
 	if (oldname == '') {
 		// Hide the titlescreen.
-		_titlescreen.AddClass('hidden');
-		_mainscreen.RemoveClass('hidden');
-		_footer.RemoveClass('hidden');
+		_webgame.titlescreen.AddClass('hidden');
+		_webgame.mainscreen.RemoveClass('hidden');
+		_webgame.footer.RemoveClass('hidden');
 		please.renderer.overlay.RemoveClass('hidden');
-		_game.RemoveClass('hidden');
-		document.title = _gametitle + ' - ' + Public.name;
+		_webgame.game.RemoveClass('hidden');
+		document.title = _webgame.gametitle + ' - ' + Public.name;
 		if (window.camera !== undefined)
-			_resize_window();
-		if (window.update_canvas && !use_3d)
+			_webgame.resize_window();
+		if (window.update_canvas !== undefined && !use_3d)
 			window.update_canvas(please.dom.context);
-		if (window.new_game)
+		if (window.new_game !== undefined)
 			window.new_game();
 	}
 	if (Public.demo)
-		_body.AddClass('demo');
+		_webgame.body.AddClass('demo');
 	else
-		_body.RemoveClass('demo');
+		_webgame.body.RemoveClass('demo');
 	if (Public.owner === null) {
-		_owner.AddClass('hidden');
-		_noowner.RemoveClass('hidden');
-		_claim.RemoveClass('hidden');
-		_release.AddClass('hidden');
+		_webgame.owner.AddClass('hidden');
+		_webgame.noowner.RemoveClass('hidden');
+		_webgame.claim.RemoveClass('hidden');
+		_webgame.release.AddClass('hidden');
 	}
 	else {
-		_owner.RemoveClass('hidden').ClearAll().AddText(Public.players[Public.owner].name);
-		_noowner.AddClass('hidden');
-		_claim.AddClass('hidden');
+		_webgame.owner.RemoveClass('hidden').ClearAll().AddText(Public.players[Public.owner].name);
+		_webgame.noowner.AddClass('hidden');
+		_webgame.claim.AddClass('hidden');
 		if (Public.owner == my_num)
-			_release.RemoveClass('hidden');
+			_webgame.release.RemoveClass('hidden');
 		else
-			_release.AddClass('hidden');
+			_webgame.release.AddClass('hidden');
 	}
 	// Update players list.
-	while (_playerrows.length > Public.players.length)
-		_players.removeChild(_playerrows.pop().tr);
-	while (_playerrows.length < Public.players.length) {
-		var num = _playerrows.length;
-		var tr = _players.AddElement('tr');
+	while (_webgame.playerrows.length > Public.players.length)
+		_webgame.players.removeChild(_webgame.playerrows.pop().tr);
+	while (_webgame.playerrows.length < Public.players.length) {
+		var num = _webgame.playerrows.length;
+		var tr = _webgame.players.AddElement('tr');
 		var icon = tr.AddElement('td').AddElement('div', 'icon');
 		icon.style.background = playercolor(num);
 		var name = tr.AddElement('td');
@@ -911,11 +918,11 @@ function _Public_update(path, value) { // {{{
 		var button = kick.AddElement('button').AddText(_('Kick'));
 		button.type = 'button';
 		button.num = num;
-		button.AddEvent('click', function() { game('admin', 'kick', this.num); });
-		_playerrows.push({tr: tr, nametext: undefined, name: name, kick: kick});
+		button.AddEvent('click', function() { game('webgame', 'kick', this.num); });
+		_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kick});
 	}
-	for (var i = 0; i < _playerrows.length; ++i) {
-		var p = _playerrows[i];
+	for (var i = 0; i < _webgame.playerrows.length; ++i) {
+		var p = _webgame.playerrows[i];
 		var name = Public.players[i].name;
 		if (p.nametext !== name) {
 			p.name.ClearAll().AddText(name === null ? _('(not connected)') : name);
@@ -926,34 +933,57 @@ function _Public_update(path, value) { // {{{
 		else
 			p.kick.AddClass('hidden');
 	}
-	if (window.update !== undefined)
-		window.update();
-} // }}}
-
-function _Private_update(path, value) { // {{{
-	_update(false, path, value);
-	if (Public.name == '') {
-		if (window.title_update !== undefined)
-			window.title_update();
-		return;
+	// Check watch events.
+	// Fire them in a separate loop, to avoid unexpected behavior when the watch list is changed from a callback.
+	var fire = [];
+	for (var w = 0; w < _webgame.watchlist.length; ++w) {
+		var watch_path = _webgame.watchlist[w][0];
+		var obj = (watch_path[0] == 'Public' ? transaction.Public : transaction.Private);
+		var current = (watch_path[0] == 'Public' ? Public : Private);
+		outer: for (var c = 0; c < obj[1].length; ++c) {
+			var changed = obj[1][c];
+			for (var i = 0; i < changed.length && i < watch_path.length - 1; ++i) {
+				if (watch_path[i + 1] != changed[i]) {
+					continue outer;
+				}
+			}
+			// This path has been matched. Fire the watch event.
+			var old_value = obj[0];
+			var new_value = current;
+			for (var i = 1; i < watch_path.length; ++i) {
+				if (old_value !== undefined)
+					old_value = old_value[watch_path[i]];
+				if (new_value !== undefined)
+					new_value = new_value[watch_path[i]];
+			}
+			fire.push([_webgame.watchlist[w][1], _webgame.deepcopy(old_value), _webgame.deepcopy(new_value)]);
+			break;
+		}
+	}
+	// Fire watch events.
+	for (var w = 0; w < fire.length; ++w) {
+		var cb = fire[w][0];
+		var old_value = watch[w][1];
+		var new_value = watch[w][2];
+		cb(new_value, old_value);
 	}
 	if (window.update !== undefined)
 		window.update();
 } // }}}
 
-function _deepcopy(obj) { // {{{
+_webgame.deepcopy = function(obj) { // {{{
 	if (typeof obj != 'object' || obj === null)
 		return obj;
 	if (obj.constructor === [].constructor) {
 		var ret = [];
 		for (var i = 0; i < obj.length; ++i)
-			ret[i] = _deepcopy(obj[i]);
+			ret[i] = _webgame.deepcopy(obj[i]);
 		return ret;
 	}
 	else if (obj.constructor === {}.constructor) {
 		var ret = {};
 		for (var i in obj)
-			ret[i] = _deepcopy(obj[i]);
+			ret[i] = _webgame.deepcopy(obj[i]);
 		return ret;
 	}
 	else {
@@ -962,55 +992,66 @@ function _deepcopy(obj) { // {{{
 	}
 } // }}}
 
-function _change_name() { // {{{
-	var name = document.getElementById('playername').value;
-	game('admin', 'name', name);
-} // }}}
-
-function _select_language() { // {{{
-	var lang = document.getElementById('language_select').value;
-	_set_language(lang);
-	if (Public === undefined || Public.name === undefined)
-		return;
-	if (Public.name == '') {
-		if (window.title_update !== undefined)
-			window.title_update();
-	}
-	else if (window.text_update !== undefined)
-		window.text_update();
-	else if (window.update !== undefined)
-		window.update();
-} // }}}
-
-function _chat(event) { // {{{
-	if (event.keyCode != 13)
-		return;
-	var text = event.target.value;
-	event.target.value = '';
-	if (text != '')
-		game('admin', 'chat', text);
-} // }}}
-
-function chat(source, message) { // {{{
-	var p = _chatter.AddElement('p');
-	if (source !== null) {
-		var span = p.AddElement('span');
-		if (typeof(source) == 'string')
-			span.AddText(source);
+_webgame.update = function(is_public, path, value) { // {{{
+	//console.info('update', is_public, path, value);
+	var top = (is_public ? Public : Private);
+	// Record path for watchers. Duplicates are harmless.
+	if (is_public)
+		_webgame.transaction.Public[1].push(path);
+	else
+		_webgame.transaction.Private[1].push(path);
+	// Update the data.
+	if (path.length > 0) {
+		var target = top;
+		for (var i = 0; i < path.length - 1; ++i)
+			target = target[path[i]];
+		var key = path[path.length - 1];
+		if (value !== undefined)
+			target[key] = value;
 		else {
-			span.AddText(Public.players[source].name);
-			span.style.color = playercolor(source);
+			delete target[key];
+			if (target instanceof Array) {
+				while (target[target.length - 1] === undefined)
+					target.length -= 1;
+			}
 		}
-		p.AddText(': ');
 	}
-	var parts = message.split('\n');
-	for (var i = 0; i < parts.length - 1; ++i) {
-		p.AddText(parts[i]);
-		p.AddElement('br');
-		p.AddElement('span', 'spacer');
-	}
-	p.AddText(parts[parts.length - 1]);
-	p.scrollIntoView();
+	else if (is_public)
+		Public = value;
+	else
+		Private = value;
 } // }}}
 
+_webgame.Public_update = function(path, value) { // {{{
+	//console.info('update', path, value);
+	if (_webgame.transaction === undefined) {
+		_webgame.start();
+		_webgame.update(true, path, value);
+		_webgame.finish();
+	}
+	else
+		_webgame.update(true, path, value);
+} // }}}
+
+_webgame.Private_update = function(path, value) { // {{{
+	if (_webgame.transaction === undefined) {
+		_webgame.start();
+		_webgame.update(false, path, value);
+		_webgame.finish();
+	}
+	else
+		_webgame.update(false, path, value);
+} // }}}
+
+// Other.
+_webgame.update_url = function() { // {{{
+	if (my_name === undefined)
+		return;
+	var lang;
+	if (_webgame.language === undefined)
+		lang = '';
+	else
+		lang = '&lang=' + encodeURIComponent(_webgame.language);
+	history.replaceState(null, document.title, document.location.protocol + '//' + document.location.host + '/?name=' + encodeURIComponent(my_name) + lang);
+} // }}}
 // }}}

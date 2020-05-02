@@ -21,13 +21,15 @@ code. Translating happens in javascript.
 
 # Imports. {{{
 import gettext
+import traceback
+import network
 import websocketd
-from websocketd import log
 import fhs
 import sys
 import os
 import time
 import json
+import re
 import collections
 
 sys.path = [os.path.dirname(sys.argv[0])] + sys.path
@@ -39,6 +41,10 @@ fhs.module_option('webgame', 'port', 'network port to listen for client connecti
 fhs.module_option('webgame', 'tls', 'use encrypted connection', argtype = bool)
 
 server = None
+
+# custom log function with modified file name
+def log(*msg):
+	websocketd.log(*msg, filename = 'webgame', depth = 1)
 
 # Shared object handling. {{{
 '''The Shared_Object, Shared_Instance and Shared_Array behave as javascript
@@ -75,14 +81,14 @@ class Shared_Object(collections.abc.MutableMapping): # {{{
 			path = self._path[1:] + [key]
 			if self._target is None:
 				assert self._path[0] == 'Public'
-				server.broadcast[self._group].Public_update(path)
+				server.broadcast[self._group].webgame('Public_update', path)
 			elif self._path[0] == 'Public':
 				assert self._group in self._target.connection._socket.groups
 				if self._target.connection:
-					self._target.connection._socket.Public_update.event(path)
+					self._target.connection._socket.webgame.event('Public_update', path)
 			else:
 				if self._target.connection:
-					self._target.connection._socket.Private_update.event(path)
+					self._target.connection._socket.webgame.event('Private_update', path)
 	def __getitem__(self, key):
 		return getattr(self, str(key))
 	def __setitem__(self, key, value):
@@ -144,14 +150,14 @@ class Shared_Instance(collections.abc.MutableMapping): # {{{
 			path = self._path[1:] + [key]
 			if self._target is None:
 				assert self._path[0] == 'Public'
-				server.broadcast[self._group].Public_update(path)
+				server.broadcast[self._group].webgame('Public_update', path)
 			elif self._path[0] == 'Public':
 				assert self._group in self._target.connection._socket.groups
 				if self._target.connection:
-					self._target.connection._socket.Public_update.event(path)
+					self._target.connection._socket.webgame.event('Public_update', path)
 			else:
 				if self._target.connection:
-					self._target.connection._socket.Private_update.event(path)
+					self._target.connection._socket.webgame.event('Private_update', path)
 	def __getitem__(self, key):
 		return getattr(self, str(key))
 	def __setitem__(self, key, value):
@@ -235,14 +241,14 @@ class Shared_Array(collections.abc.MutableSequence): # {{{
 			path = self.path[1:] + ['length']
 			if self.target is None:
 				assert self.path[0] == 'Public'
-				server.broadcast[self.group].Public_update(path, len(self.data))
+				server.broadcast[self.group].webgame('Public_update', path, len(self.data))
 			elif self.path[0] == 'Public':
 				assert self.group in self.target.connection._socket.groups
 				if self.target.connection:
-					self.target.connection._socket.Public_update.event(path, len(self.data))
+					self.target.connection._socket.webgame.event('Public_update', path, len(self.data))
 			else:
 				if self.target.connection:
-					self.target.connection._socket.Private_update.event(path, len(self.data))
+					self.target.connection._socket.webgame.event('Private_update', path, len(self.data))
 	def __lt__(self, other):
 		return list(self) < list(other)
 	def __len__(self):
@@ -338,17 +344,17 @@ def broadcast_shared(target, path, value, group = None): # {{{
 		assert path[0] == 'Public'
 		# Send public update to everyone.
 		#log('broadcast {0} {1}'.format(repr(path), repr(value)))
-		server.broadcast[group].Public_update(path[1:], value)
+		server.broadcast[group].webgame('Public_update', path[1:], value)
 	else:
 		if path[0] == 'Public':
 			assert group in target._socket.groups
 			#log('Public {0} {1}'.format(repr(path), repr(value)))
 			# Send public information to target.
-			target._socket.Public_update.event(path[1:], value)
+			target._socket.webgame.event('Public_update', path[1:], value)
 		else:
 			#log('Private {0} {1}'.format(repr(path), repr(value)))
 			# Send private information for target that is controlling the correct player.
-			target._socket.Private_update.event(path[1:], value)
+			target._socket.webgame.event('Private_update', path[1:], value)
 # }}}
 # }}}
 
@@ -478,7 +484,7 @@ class Instance: # Class for game instances. {{{
 		#log('done')
 		self.ended = True
 		self.game.Public.ended = True
-		self.game.broadcast.end(code)
+		self.game.broadcast.webgame('end', code)
 		if all(p.connection is None for p in self.game.players):
 			self.close()
 
@@ -499,6 +505,7 @@ class Instance: # Class for game instances. {{{
 			task.reply(ret[0] if len(ret) == 1 else ret)
 			task.reply = None
 		self.game.reply = reply
+		transaction.enter(self)
 		try:
 			#log('sending {0}'.format(repr(arg)))
 			cmd = task.generator.send(arg)
@@ -506,6 +513,7 @@ class Instance: # Class for game instances. {{{
 			task.value = e.value
 			task.done = True
 			end_task = (True, e.value)
+		transaction.leave(self)
 		del self.game.reply
 		if hasattr(task, 'reply'):
 			if task.reply is not None:
@@ -551,21 +559,29 @@ class Instance: # Class for game instances. {{{
 		# Add new commands.
 		# Insert all actions in one operations, to avoid sending messages that are already outdated.
 		prepare_actions = {}
-		for c in cmd:	# c is the name of the command.
+		for c in cmd:	# c is the name of the command, or (name, argdecl).
 			if isinstance(c, Task):
 				continue
-			if c in self.cmds:
-				assert task not in self.cmds[c]
+			if isinstance(c, (list, tuple)):
+				assert len(c) == 2
+				argdecl = c[1]
+				cmdname = c[0]
 			else:
-				self.cmds[c] = {}
-			self.cmds[c][task] = cmd[c]
-			who = [cmd[c]] if isinstance(cmd[c], int) else tuple(range(len(self.game.players))) if cmd[c] is None else cmd[c]
+				argdecl = None
+				cmdname = c
+			if cmdname in self.cmds:
+				assert task not in self.cmds[cmdname]
+			else:
+				self.cmds[cmdname] = {}
+			pcmd = self.parse_args(argdecl, cmd[c])
+			self.cmds[cmdname][task] = pcmd
+			who = tuple(range(len(self.game.players))) if pcmd[0] is None else pcmd[0]
 			for p in who:
 				if p not in prepare_actions:
-					prepare_actions[p] = {a: True for a in self.game.players[p].Private.actions if a}
-				if c in prepare_actions[p]:
-					log('Error: action %s is already allowed for player %s (yield arg: %s)' % (c, p, cmd))
-				prepare_actions[p][c] = True
+					prepare_actions[p] = {a: True for a in self.game.players[p].Private.actions}
+				if cmdname in prepare_actions[p]:
+					log('Error: action %s is already allowed for player %s (yield arg: %s)' % (cmdname, p, cmd))
+				prepare_actions[p][cmdname] = True
 		for p in prepare_actions:
 			self.game.players[p].Private.actions = prepare_actions[p]
 
@@ -573,15 +589,16 @@ class Instance: # Class for game instances. {{{
 		'''Remove task and clean up everything.
 		This happens any time a task is resumed.
 		Things are set back up when it yields.
-		Example value for self.cmds: {'play': {task: 0}} (player 0 may use the play command, registered by task)
+		Example value for self.cmds: {'play': {task: [0, [int, bool]]}} (player 0 may use the play(int, bool) command, registered by task)
 		'''
 		prepare_actions = {}
 		for k in [x for x in self.cmds if task in self.cmds[x]]:
-			who = [self.cmds[k][task]] if isinstance(self.cmds[k][task], int) else tuple(range(len(self.game.players))) if self.cmds[k][task] is None else self.cmds[k][task]
+			who = tuple(range(len(self.game.players))) if self.cmds[k][task][0] is None else self.cmds[k][task][0]
 			for p in who:
 				if not isinstance(p, Task):
 					if p not in prepare_actions:
 						prepare_actions[p] = {a: True for a in self.game.players[p].Private.actions if a}
+					#log(repr((prepare_actions[p], k, self.game.players[p].Private.actions)))
 					del prepare_actions[p][k]
 			del self.cmds[k][task]
 		for p in prepare_actions:
@@ -671,6 +688,30 @@ class Instance: # Class for game instances. {{{
 			if r is None:
 				break
 			who.remove(r['player'])
+
+	def parse_args(self, argdecl, cmd):
+		if argdecl is not None:
+			translation = {'i': int, 's': str, 'f': float, 'b': bool, '*': None}
+			argdecl = tuple(map(lambda x: translation[x], argdecl))
+		if cmd is None:
+			return (None, argdecl)
+		if isinstance(cmd, int):
+			return ((cmd,), argdecl)
+		assert isinstance(cmd, (list, tuple))
+		assert all(isinstance(x, int) for x in cmd)
+		return (cmd, argdecl)
+
+	def check_args(self, argdecl, a, ka):
+		if argdecl is None:
+			return True
+		if len(ka) > 0:
+			return False
+		# If the command exists and is valid for this player, but the arguments are wrong, notify player.
+		if len(a) != len(argdecl):
+			return _('incorrect number of arguments to function {0} (given {1}, expected {2})'), (len(a), len(argdecl))
+		if any(decl is not None and not isinstance(arg, decl) for arg, decl in zip(a, argdecl)):
+			return _('incorrect argument type given to function {0}'), ()
+		return True
 # }}}
 
 class Args(dict): # Class for command arguments; ordered dict. {{{
@@ -698,7 +739,7 @@ class Connection: # {{{
 			self._name = '{0} {1}'.format(name, i)
 			i += 1
 		connections[self._name] = self
-		self._socket.id.event(self._name, self._num)
+		self._socket.webgame.event('id', self._name, self._num)
 		self._instance.update_stats()
 	def __init__(self, socket):
 		'''Set up a new connection.
@@ -722,8 +763,8 @@ class Connection: # {{{
 			if language in languages:
 				languages.remove(language)
 			languages.insert(0, socket.data['query']['language'])
-		self._socket.id.event(self._name, None)
-		self._socket.webgame_init.event(languages)	# TODO: Add use3d, file list and audio.
+		self._socket.webgame.event('id', self._name, None)
+		self._socket.webgame.event('init', languages)	# TODO: Add use3d, file list and audio.
 		broadcast_shared(self, ['Public'], self._instance.game.Public)
 		broadcast_shared(self, ['Private'], None, title_game.game.Public.name)
 	def _closed(self):
@@ -762,13 +803,20 @@ class Connection: # {{{
 		def wrap(*a, **ka):
 			wake = (yield)
 			for task in queue.copy(): # Try to run this command on any task, until it is allowed.
-				func = queue[task]
-				if isinstance(func, int):
-					func = (func,)
+				func, funcargs = queue[task]
 				if isinstance(func, (tuple, list, set, frozenset)):
 					if self._num not in func:
 						continue
 					func = None
+				check = self._instance.check_args(funcargs, a, ka)
+				if check is False:
+					log('warning: %s called %s with wrong arguments' % self._name, attr)
+					continue
+				if check is not True:
+					# This error should be passed to the player.
+					if hasattr(self._instance.game, 'error'):
+						return self_instance.game.error(self, check[0], (attr,) + check[1])
+					return check[0], (attr,) + check[1]
 				args = {'args': Args(a, ka), 'connection': self, 'player': self._num, 'command': attr}
 				if func is not None:
 					websocketd.add_idle(lambda: wake(func(args)))
@@ -807,7 +855,10 @@ class Title: # Class for default title game object. {{{
 				connection._instance.game.reply(_('no game name specified'))
 				continue
 			if command == 'new':
+				# Launching the game breaks the transaction logic. Hack around that by breaking the pending transaction in two parts.
+				transaction.leave(title_game)
 				i = Instance(game.Game, *cmd['args'])
+				transaction.enter(title_game)
 				cmd['args'][0] = i.game.Public.name
 				i.game.Public.owner = 0
 				command = 'join'	# fall through.
@@ -831,7 +882,7 @@ class Title: # Class for default title game object. {{{
 				connection._instance = instance
 				connection._socket.groups.remove(self.Public.name)
 				connection._socket.groups.add(cmd['args'][0])
-				connection._socket.id.event(connection._name, connection._num)
+				connection._socket.webgame.event('id', connection._name, connection._num)
 				# Private must be sent before Public, because when Public.name is set, all shared variables must be available.
 				broadcast_shared(connection, ['Private'], connection._instance.game.players[connection._num].Private)
 				broadcast_shared(connection, ['Public'], connection._instance.game.Public)
@@ -842,7 +893,7 @@ class Title: # Class for default title game object. {{{
 					continue
 				connection._instance = instance
 				connection._num = cmd['args'][1]
-				connection._socket.id.event(connection._name, connection._num)
+				connection._socket.webgame.event('id', connection._name, connection._num)
 				instance.game.players[cmd['args'][1]].connection = connection
 				connection._socket.groups.remove(self.Public.name)
 				connection._socket.groups.add(cmd['args'][0])
@@ -893,7 +944,7 @@ def admin(args): # {{{
 		connection._instance = title_game
 		connection._socket.groups.add(title_game.game.Public.name)
 		connection._num = None
-		connection._socket.id.event(connection._name, None)
+		connection._socket.webgame.event('id', connection._name, None)
 		broadcast_shared(connection, ['Public'], connection._instance.game.Public)
 		broadcast_shared(connection, ['Private'], None, title_game.game.Public.name)
 		if end:
@@ -920,8 +971,64 @@ def admin(args): # {{{
 			return _('Cannot kick this player')
 		return admin({'connection': the_game.players[cmd[1]].connection, 'args': ['leave']})
 	elif cmd[0] == 'chat':
-		connection._instance.game.broadcast.chat(connection._num if connection._num is not None else connection._name, cmd[1])
+		connection._instance.game.broadcast.webgame('chat', connection._num if connection._num is not None else connection._name, cmd[1])
 # }}}
+
+
+class Transaction:	# Singleton class {{{
+	def __init__(self):
+		self.instance = None
+		self.started = False
+	def __enter__(self):
+		assert self.instance is not None
+		assert not self.started
+		self.started = True
+		self.instance.game.broadcast.webgame('start')
+	def __exit__(self, *exc):
+		assert self.instance is not None
+		assert self.started
+		self.started = False
+		self.instance.game.broadcast.webgame('finish')
+	def enter(self, instance):
+		assert self.instance is None
+		self.instance = instance
+	def leave(self, instance):
+		assert self.instance is instance
+		self.instance = None
+transaction = Transaction()
+# }}}
+
+def show(obj, indent = '', prefix = ''):
+	if isinstance(obj, (Shared_Array, tuple, list)):
+		print(indent + prefix + '[')
+		for i, v in enumerate(obj):
+			show(v, indent + '  ', '%d: ' % i)
+		print(indent + ']')
+	elif isinstance(obj, (Shared_Object, Shared_Instance, dict)):
+		print(indent + prefix + '{')
+		for k in obj:
+			show(obj[k], indent + '  ', '%s: ' % k)
+		print(indent + '}')
+	else:
+		print(indent + prefix + repr(obj))
+def adminjoin(name = None):
+	if name is None:
+		if len(instances) != 2 or adminvars['game'].name != '':
+			name = ''
+		else:
+			name = (x for x in instances if x != '')[0]
+	if name not in instances:
+		print('name %s does not exist' % name, file = sys.stderr)
+		return
+	adminvars['instance'] = instances[name]
+	adminvars['game'] = adminvars['instance'].game
+	print('Joined "%s"' % name)
+adminvars = {'instance': None, 'game': None, 'join': adminjoin}
+def stdinput(line):
+	try:
+		exec(line.replace('###', '\n'), None, adminvars)
+	except:
+		traceback.print_exc()
 
 def Game(): # Main function to start a game. {{{
 	'''This function starts the system.
@@ -938,6 +1045,9 @@ def Game(): # Main function to start a game. {{{
 	# Initialize fhs module.
 	if not fhs.initialized:
 		fhs.init(packagename = game.name.lower(), game = True)
+	# Set up some globals.
+	game.transaction = transaction
+	game.log = websocketd.log
 	# Set up other constants.
 	if not hasattr(game, 'autokill'):
 		game.autokill = True
@@ -953,10 +1063,14 @@ def Game(): # Main function to start a game. {{{
 		_num_players = (game.num_players[0], game.num_players[1], True)
 	assert 1 <= _num_players[0] and (_num_players[1] is None or _num_players[0] <= _num_players[1])
 	# Set up commands.
-	cmds['admin'] = {None: admin}
+	cmds['webgame'] = {None: (admin, None)}
 	if hasattr(game, 'commands'):
 		for c in game.commands:
 			cmds[c] = {None: game.commands[c]}
+	# Start debug console on stdio.
+	global stdio
+	stdio = network.wrap(sys.stdin, sys.stderr)
+	stdio.readlines(stdinput)
 	# Start up websockets server.
 	config = fhs.module_get_config('webgame')
 	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html', os.path.join('html', game.name.lower()))]
@@ -980,6 +1094,8 @@ def Game(): # Main function to start a game. {{{
 		title_game = Instance(game.Title, '')
 	else:
 		title_game = Instance(Title, '')
+	# Add the admin to the title game.
+	adminjoin()
 	log('Game "{0}" started, listening on port {1}'.format(game.name, config['port']))
 	# Main loop.
 	websocketd.fgloop()

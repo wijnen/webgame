@@ -36,6 +36,7 @@ html/webgame/jta/*.jta
 # Imports and config. {{{
 import fhs
 import network
+from network import log
 import websocketd
 import sys
 import os
@@ -70,7 +71,7 @@ if os.path.isdir(jssrc):
 	js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
 	css = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'css') and not os.path.isdir(os.path.join(jssrc, x))]
 else:
-	websocketd.log('Warning: no html directory found in {}; game will be useless'.format(config['src']))
+	log('Warning: no html directory found in {}; game will be useless'.format(config['src']))
 	js = []
 	css = []
 js.sort()
@@ -119,9 +120,9 @@ missed_system = syslang.difference(gamelang)
 missed_game = gamelang.difference(syslang)
 languages = syslang.intersection(gamelang)
 if len(missed_system) > 0:
-	print('Warning: No game translation provided for language(s): %s' % ', '.join(missed_system), file = sys.stderr)
+	log('Warning: No game translation provided for language(s): %s' % ', '.join(missed_system))
 if len(missed_game) > 0:
-	print('=============================================================\nWarning: No system translation provided for language(s): %s\nGame translation will not be available for those language(s).\n=============================================================' % ', '.join(missed_game), file = sys.stderr)
+	log('=============================================================\nWarning: No system translation provided for language(s): %s\nGame translation will not be available for those language(s).\n=============================================================' % ', '.join(missed_game))
 for lang in languages:
 	syspo = os.path.join(sysdir, lang + os.extsep + 'po') if sysdir is not None else None
 	gamepo = os.path.join(gamedir, lang + os.extsep + 'po') if gamedir is not None else None
@@ -136,7 +137,7 @@ for lang in languages:
 	def escape(s):
 		return s.replace('\n', '\\n').replace('"', '\\"')
 	with open(os.path.join(dest, 'html', 'webgame', 'lang', lang + '.js'), 'w') as f:
-		f.write('_translations["%s"] = {\n' % lang)
+		f.write('_webgame.translations["%s"] = {\n' % lang)
 		f.write(',\n'.join('"' + escape(k) + '": "' + escape(v) + '"' for k, v in terms._catalog.items()))
 		f.write('\n};\n')
 # }}}
@@ -169,7 +170,7 @@ def find(srcbase, destbase, prefix, antisuffix, specific): # {{{
 # }}}
 
 # Build list of loaded files. {{{
-loader = [None, None]
+loader = [(), ()]
 can = [False, False]
 targets = [[], []]
 for suffix, antisuffix, use_3d in (('-2d', '-3d', False), ('-3d', '-2d', True)):
@@ -236,7 +237,7 @@ copy(fhs.read_data(os.path.join('html', 'gl-matrix' + os.extsep + 'js'), opened 
 copy(fhs.read_data(os.path.join('html', 'mgrl' + os.extsep + 'js'), opened = False), os.path.join(dest, 'html', 'mgrl' + os.extsep + 'js'))
 copy(fhs.read_data('builders' + os.extsep + 'js', opened = False, packagename = 'python3-websocketd'), os.path.join(dest, 'html', 'builders' + os.extsep + 'js'))
 copy(fhs.read_data(os.path.join('html', 'index' + os.extsep + 'html'), opened = False), os.path.join(dest, 'html', 'index' + os.extsep + 'html'))
-copy(fhs.read_data('game', opened = False), os.path.join(dest, main))
+copy(fhs.read_data('webgame', opened = False), os.path.join(dest, main))
 # }}}
 
 # Write main python file. {{{
@@ -249,10 +250,10 @@ for m in sys.modules:
 	if m == '__main__':
 		continue
 	if not hasattr(sys.modules[m], '__file__'):
-		#print('no file: {}'.format(m))
+		#log('no file: {}'.format(m))
 		continue
 	if os.path.realpath(os.path.dirname(sys.modules[m].__file__)) != mydir:
-		#print('wrong dir: {} {}'.format(mydir, sys.modules[m].__file__))
+		#log('wrong dir: {} {}'.format(mydir, sys.modules[m].__file__))
 		continue
 	target = os.path.join(dest, 'modules')
 	if not os.path.exists(target):

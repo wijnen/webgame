@@ -26,6 +26,7 @@ Any game-specific calls from the server are passed unchanged to the main AI clas
 '''
 
 import websocketd
+from websocketd import log
 import __main__
 import fhs
 from urllib.parse import quote
@@ -88,13 +89,71 @@ class AI:
 		socket.closed = disconnect
 		self._updating = False
 		self._updates = [None, None]
-	def id(self, name, num):
-		__main__.myname = name
-		__main__.mynum = num
-	def webgame_init(self, languages):
-		__main__.Public = Shared_Object()
-		__main__.Private = Shared_Object()
-		self._user = __main__.AI()
+	def webgame(self, func, arg1 = None, arg2 = None):
+		if func == 'id':
+			__main__.myname = arg1
+			__main__.mynum = arg2
+		elif func == 'init':
+			__main__.Public = Shared_Object()
+			__main__.Private = Shared_Object()
+			self._user = __main__.AI()
+		elif func == 'end':
+			if hasattr(self._user, 'end'):
+				self._user.end(arg1)
+			else:
+				log('Game ended.  Result: {}'.format(arg1))
+				websocketd.endloop()
+		elif func == 'chat':
+			log('Chat from %s: %s' % (arg1, arg2))
+			if hasattr(self._user, 'chat'):
+				self._user.chat(arg1, arg2)
+		elif func == 'start':
+			pass
+		elif func == 'finish':
+			pass
+		elif func == 'Public_update':
+			self._Public_update(arg1, arg2)
+		elif func == 'Private_update':
+			self._Private_update(arg1, arg2)
+	def _Public_update(self, path, value = undefined):
+		changes = self._update([__main__.Public], path, value)
+		# Connect only once.
+		if __main__.Public.name == '':
+			packagename = __main__.Public.title.lower()
+			if not self._connected:
+				self._connected = True
+				# Join a game if we can.
+				if len(__main__.Public.games) > 0:
+					if config['game'] in __main__.Public['games']:
+						__main__.game.join(config['game'])
+					else:
+						games = list(__main__.Public.games.keys())
+						games.sort()
+						__main__.game.join(games[0])
+				else:
+					# If not, create a new game.
+					__main__.game.new(config['game'] or 'started by ai')
+					__main__.game.webgame('release')
+			elif 'name' in changes:
+				# We have been kicked out of the game.
+				websocketd.endloop()
+		else:
+			if 'name' in changes and changes['name'] == '':
+				# First connection.
+				if hasattr(self._user, 'new_game'):
+					self._user.new_game()
+				elif not hasattr(self._user, 'update'):
+					log('No new_game or update defined')
+				if len(__main__.Private) > 0 and hasattr(self._user, 'Private_update'):
+					# Make update with everything undefined.
+					private_changes = {}
+					self._make_changes({}, __main__.Private, private_changes, [])
+					self._do_private_update(private_changes)
+			self._do_public_update(changes)
+	def _Private_update(self, path, value = undefined):
+		changes = self._update([__main__.Private], path, value)
+		if __main__.Public['name'] != '':
+			self._do_private_update(changes)
 	def _make_copy(self, obj):
 		if isinstance(obj, list):
 			return [self._make_copy(x) for x in obj]
@@ -109,7 +168,7 @@ class AI:
 			elif hasattr(self._user, 'update'):
 				self._user.update()
 			else:
-				websocketd.log('No Public_update or update defined')
+				log('No Public_update or update defined')
 			self._updating = False
 			self._finish_update()
 		else:
@@ -117,7 +176,7 @@ class AI:
 				if self._updates[0] is None:
 					self._updates[0] = self._make_copy(__main__.Public)
 			else:
-				websocketd.log('No Public_update or update defined')
+				log('No Public_update or update defined')
 	def _do_private_update(self, changes):
 		if not self._updating:
 			self._updating = True
@@ -126,7 +185,7 @@ class AI:
 			elif hasattr(self._user, 'update'):
 				self._user.update()
 			else:
-				websocketd.log('No Private_update or update defined')
+				log('No Private_update or update defined')
 			self._updating = False
 			self._finish_update()
 		else:
@@ -134,7 +193,7 @@ class AI:
 				if self._updates[1] is None:
 					self._updates[1] = self._make_copy(__main__.Private)
 			else:
-				websocketd.log('No Private_update or update defined')
+				log('No Private_update or update defined')
 	def _finish_update(self):
 		'''Check if there are pending updates, and handle them if there are.
 		registered changes files must be merged.'''
@@ -150,7 +209,7 @@ class AI:
 			self._updates[1] = None
 			self._do_private_update(changes)
 	def _make_changes(self, obj, value, changes, path):
-		#websocketd.log('make changes at path {}, set {} to {}'.format(path, obj, value))
+		#log('make changes at path {}, set {} to {}'.format(path, obj, value))
 		if not isinstance(value, (dict, list)):
 			# This is a leaf node. Check if it should be recorded.
 			c = changes
@@ -223,66 +282,17 @@ class AI:
 		else:
 			raise AssertionError('BUG: invalid object for update')
 		return changes
-	def Public_update(self, path, value = undefined):
-		changes = self._update([__main__.Public], path, value)
-		# Connect only once.
-		if __main__.Public.name == '':
-			packagename = __main__.Public.title.lower()
-			if not self._connected:
-				self._connected = True
-				# Join a game if we can.
-				if len(__main__.Public.games) > 0:
-					if config['game'] in __main__.Public['games']:
-						__main__.game.join(config['game'])
-					else:
-						games = list(__main__.Public.games.keys())
-						games.sort()
-						__main__.game.join(games[0])
-				else:
-					# If not, create a new game.
-					__main__.game.new(config['game'] or 'started by ai')
-					__main__.game.admin('release')
-			elif 'name' in changes:
-				# We have been kicked out of the game.
-				websocketd.endloop()
-		else:
-			if 'name' in changes and changes['name'] == '':
-				# First connection.
-				if hasattr(self._user, 'new_game'):
-					self._user.new_game()
-				elif not hasattr(self._user, 'update'):
-					websocketd.log('No new_game or update defined')
-				if len(__main__.Private) > 0 and hasattr(self._user, 'Private_update'):
-					# Make update with everything undefined.
-					private_changes = {}
-					self._make_changes({}, __main__.Private, private_changes, [])
-					self._do_private_update(private_changes)
-			self._do_public_update(changes)
-	def Private_update(self, path, value = undefined):
-		changes = self._update([__main__.Private], path, value)
-		if __main__.Public['name'] != '':
-			self._do_private_update(changes)
-	def end(self, arg):
-		if hasattr(self._user, 'end'):
-			self._user.end(arg)
-		else:
-			websocketd.log('Game ended.  Result: {}'.format(arg))
-			websocketd.endloop()
-	def chat(self, src, message):
-		log('Chat from %s: %s' % (src, message))
-		if hasattr(self._user, 'chat'):
-			self._user.chat(src, message)
 	def __getattr__(self, attr):
 		def ret(*a, **ka):
 			if not hasattr(self._user, attr):
-				websocketd.log('Calling undefined {} {} {}'.format(attr, a, ka))
+				log('Calling undefined {} {} {}'.format(attr, a, ka))
 				return
 			return getattr(self._user, attr)(*a, **ka)
 		return ret
 
 def disconnect(socket = None, data = None):
 	'''Handle socket disconnect'''
-	websocketd.log('socket disconnected')
+	log('socket disconnected')
 	websocketd.endloop()
 
 def run():
@@ -293,4 +303,5 @@ def run():
 	connection = websocketd.RPC(config['port'], AI, url = '?name=' + quote(name), tls = False, disconnect_cb = disconnect)
 	websocketd.fgloop()
 
+__main__.log = log
 __main__.run = run

@@ -22,11 +22,11 @@
 			<h3 class='translate'>Personal</h3>
 			<p>
 				<span class='translate'>Your name:</span>
-				<input type='text' id='playername' onchange='_change_name()'/>
+				<input type='text' id='playername' onchange='_webgame.change_name()'/>
 			</p>
 			<p>
 				<span class='translate'>Set language to</span>
-				<select id='language_select' onchange='_select_language();'>
+				<select id='language_select' onchange='_webgame.select_language();'>
 				</select>
 			</p>
 			<div id='game'>
@@ -35,10 +35,10 @@
 				<p>
 					Owner: <span id='owner'></span>
 					<span id='noowner' class='translate'>None</span>
-					<button id='claim' type='button' onclick='game("admin", "claim")' class='translate'>Claim</button>
-					<button id='release' type='button' onclick='game("admin", "release")' class='translate'>Release</button>
+					<button id='claim' type='button' onclick='game("webgame", "claim")' class='translate'>Claim</button>
+					<button id='release' type='button' onclick='game("webgame", "release")' class='translate'>Release</button>
 				</p>
-				<button id='leave' type='button' onclick='game("admin", "leave")' class='translate'>Leave</button>
+				<button id='leave' type='button' onclick='game("webgame", "leave")' class='translate'>Leave</button>
 				<h4 class='translate'>Players</h4>
 				<table id='players'></table>
 			</div>
@@ -51,14 +51,14 @@
 						<h2 class='translate'>Running Games</h2>
 						<p>
 							<select id='title_games'></select>
-							<button type='button' onclick="_title_join()" class='translate'>Join</button>
-							<button type='button' onclick="_title_view()" class='translate'>Watch</button>
+							<button type='button' onclick="_webgame.title_join()" class='translate'>Join</button>
+							<button type='button' onclick="_webgame.title_view()" class='translate'>Watch</button>
 							<span id='title_status'></span>
 						</p>
 					</div>
 					<h2 class='translate'>Create New Game</h2>
 					<p>
-						<button type='button' onclick="_title_new()" class='translate'>Create New Game</button>
+						<button type='button' onclick="_webgame.title_new()" class='translate'>Create New Game</button>
 						<span class='translate'>Name of the new game:</span>
 						<input type='text' id='title_game_name'/>
 						<span id='numplayers'>
@@ -72,9 +72,9 @@
 				</div>
 			</div>
 			<div id='chat'>
-				<button type='button' onclick='game("admin", "next")' id='next' class='translate'>Next</button>
+				<button type='button' onclick='game("webgame", "next")' id='next' class='translate'>Next</button>
 				<div id='chatter'></div>
-				<input type='text' onkeydown='_chat(event)'/>
+				<input type='text' onkeydown='_webgame.chat_event(event)'/>
 			</div>
 		</div>
 		<div id='footer'>
