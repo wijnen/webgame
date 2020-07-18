@@ -15,8 +15,8 @@
 		<div id='sidebar'>
 			<p id='sidebarhider'>
 				<label for='sidebarbutton'>
-					<span id='sidebarhide'>&lt;&lt;</span>
-					<span id='sidebarshow'>&gt;&gt;</span>
+					<span id='sidebarhide'>&lt;</span>
+					<span id='sidebarshow'>&gt;</span>
 				</label>
 			</p>
 			<h3 class='translate'>Personal</h3>
@@ -24,7 +24,7 @@
 				<span class='translate'>Your name:</span>
 				<input type='text' id='playername' onchange='_webgame.change_name()'/>
 			</p>
-			<p>
+			<p id='language_selector'>
 				<span class='translate'>Set language to</span>
 				<select id='language_select' onchange='_webgame.select_language();'>
 				</select>
@@ -71,6 +71,7 @@
 					<canvas id='canvas' width='1200' height='600'></canvas>
 				</div>
 			</div>
+			<div id='handle'></div>
 			<div id='chat'>
 				<button type='button' onclick='game("webgame", "next")' id='next' class='translate'>Next</button>
 				<div id='chatter'></div>

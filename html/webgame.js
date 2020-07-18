@@ -1,8 +1,8 @@
+// use strict;
 // vim: set foldmethod=marker :
 
 // Functions and variables which can be replaced by user code. {{{
 
-var use_3d;
 var mouse_navigation = true;
 var viewport = [-20, -15, 20, 15];	// Initial camera viewport.
 var show_players = false;	// If true, show the player list at bottom.
@@ -44,6 +44,7 @@ var my_name = null;	// Player name, as returned by the server.
 var my_num = null;	// Player number of me, or null if not playing.
 // Lesser used options are in the "webgame" object, to prevent namespace pollution.
 var webgame = {
+	use_3d: true,	// If true, the interface is 3d. Otherwise, it is 2d.
 	title_gamelist: [],	// Games which are available in the title screen.
 	title_select: undefined	// Select element on title screen (for changing style).
 };
@@ -83,8 +84,10 @@ function _(message, force_args) {	// Support for translations. {{{
 		parts[parts.length - 1] += message.substr(0, pos);
 		var code = message[pos + 1];
 		message = message.substr(pos + 2);
-		if (code == '$')
+		if (code == '$') {
+			parts[parts.length - 1] += '$';
 			continue;
+		}
 		substs.push(Number(code));
 		parts.push('');
 	}
@@ -106,6 +109,18 @@ function _(message, force_args) {	// Support for translations. {{{
 		}
 		return ret;
 	};
+} // }}}
+
+function handle_cursor(keycode) { // compute direction from keycode. {{{
+	if (keycode == 37)
+		return [-1, 0];
+	if (keycode == 38)
+		return [0, 1]
+	if (keycode == 39)
+		return [1, 0];
+	if (keycode == 40)
+		return [0, -1]
+	return null;
 } // }}}
 
 function watch(path, cb) { // {{{
@@ -206,6 +221,7 @@ function new_div(w, h, pw, ph, redraw, parent) { // {{{
 	var div = please.overlay.new_element();
 	var node = new please.GraphNode();
 	node.div = div;
+	div.node = node;
 	(parent ? parent : graph).add(node);
 	div.bind_to_node(node);
 	div.style.width = pw + 'px';
@@ -239,33 +255,57 @@ function pos_from_event(event) { // {{{
 
 function move_node(node, dst, time, callback) { // {{{
 	var src = node.location;
-	node.location = please.path_driver(please.linear_path(src, dst), time, false, false, function() {
+	node.location = please.path_driver(please.linear_path(src, dst), time * 1000, false, false, function() {
 		node.location = dst;
 		if (callback !== undefined)
 			callback();
 	});
 } // }}}
 
+function edit_image(img, tname, editor) { // {{{
+	var canvas = Create('canvas');
+	canvas.width = img.width;
+	canvas.height = img.height;
+	var ctx = canvas.getContext('2d');
+	ctx.drawImage(img, 0, 0);
+	editor(ctx);
+	please.media.assets[tname] = canvas;
+} // }}}
+
 function edit_texture(instance, tname, editor) { // {{{
 	if (please.media.assets[tname] === undefined) {
 		var img = please.media.assets[instance.shader.diffuse_texture];
-		var canvas = Create('canvas');
-		canvas.width = img.width;
-		canvas.height = img.height;
-		var ctx = canvas.getContext('2d');
-		ctx.drawImage(img, 0, 0);
-		editor(ctx);
-		please.media.assets[tname] = canvas;
+		edit_image(img, tname, editor);
 	}
 	instance.shader.diffuse_texture = tname;
 } // }}}
 
-function player_texture(instance, num) { // {{{
-	edit_texture(instance, 'texture-player-' + num + '-' + instance.shader.diffuse_texture, function(ctx) {
-		ctx.fillStyle = playercolor(num);
-		ctx.fillRect(0, 0, 1, 1);
-	});
-	return instance;
+function color_texture(instance, tname, color) { // {{{
+	if (please.media.assets[tname] === undefined) {
+		var canvas = Create('canvas');
+		var w, h, draw;
+		if (instance === null) {
+			w = 1;
+			h = 1;
+			draw = function() {};
+		}
+		else {
+			var img = please.media.assets[instance.shader.diffuse_texture];
+			w = img.width;
+			h = img.height;
+			draw = function() { ctx.drawImage(img, 0, 0); }
+		}
+		canvas.width = w;
+		canvas.height = h;
+		var ctx = canvas.getContext('2d');
+		ctx.fillStyle = color;
+		ctx.fillRect(0, 0, w, h);
+		draw();
+		please.media.assets[tname] = canvas;
+		dbg('created image', tname, 'with color', color);
+	}
+	if (instance !== null)
+		instance.shader.diffuse_texture = tname;
 } // }}}
 
 function send_chat(message) { // {{{
@@ -298,7 +338,7 @@ function show_chat(source, message) { // {{{
 
 // Internal variables and functions. {{{
 // Global variables for internal use are all inside one object to prevent namespace pollution.
-var _webgame = { playerrows: [], watchlist: [], canvas_list: [], div_list: [], translations: {}, chat: show_chat };
+var _webgame = { playerrows: [], watchlist: [], canvas_list: [], div_list: [], translations: {}, chat: show_chat, ui: {}, removing: [], prepare_update: [] };
 
 // System initialization.
 window.AddEvent('load', function() { // {{{
@@ -306,7 +346,7 @@ window.AddEvent('load', function() { // {{{
 	xhr.AddEvent('loadend', function() {
 		var lines = xhr.responseText.split('\n');
 		var load = [[], []];
-		use_3d = true;
+		webgame.use_3d = true;
 		var head = document.getElementsByTagName('head')[0];
 		var loading = 0;
 		for (var l = 0; l < lines.length; ++l) {
@@ -335,7 +375,7 @@ window.AddEvent('load', function() { // {{{
 				link.href = value;
 			}
 			else if (key == 'use3d')
-				use_3d = (value == 'True');
+				webgame.use_3d = (value == 'True');
 			else if (key == 'load') {
 				load[0].push(value);
 				load[1].push(value);
@@ -352,19 +392,20 @@ window.AddEvent('load', function() { // {{{
 			loading -= 1;
 			if (loading > 0)
 				return;
-			if (use_3d) {
+			if (webgame.use_3d) {
 				if (document.location.search[0] == '?') {
 					var s = document.location.search.substring(1).split('&');
-					for (var i = i; i < s.length; ++i) {
-						var kv = s[i].split('=', 1);
+					for (var i = 0; i < s.length; ++i) {
+						var kv = s[i].split('=', 2);
 						if (kv[0] == '2d' && kv[1] != '0') {
-							use_3d = false;
+							webgame.use_3d = false;
+							_webgame.force_2d = true;
 							break;
 						}
 					}
 				}
 			}
-			if (use_3d)
+			if (webgame.use_3d)
 				please.gl.set_context('canvas');
 			else
 				please.dom.set_context('canvas');
@@ -382,10 +423,9 @@ window.AddEvent('load', function() { // {{{
 			// audio is not set up yet.
 			_webgame.audio = {};
 			audio = {};
-			var list = load[use_3d ? 1 : 0];
+			var list = load[webgame.use_3d ? 1 : 0];
 			if (list.length > 0) {
 				for (var f = 0; f < list.length; ++f) {
-					//console.info('loading', list[f]);
 					please.load(list[f]);
 					var ext = list[f].substr(-4);
 					if (ext == '.ogg' || ext == '.wav' || ext == '.mp3')
@@ -393,7 +433,7 @@ window.AddEvent('load', function() { // {{{
 				}
 			}
 			else
-				window.dispatchEvent(new CustomEvent("mgrl_media_ready"));
+				window.dispatchEvent(new CustomEvent('mgrl_media_ready'));
 		}
 		if (loading == 0)
 			load_done();
@@ -404,11 +444,15 @@ window.AddEvent('load', function() { // {{{
 }); // }}}
 
 window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
+	if (webgame.use_3d) {
+		var square = '{"meta": {"jta_version": [0.1]}, "attributes": [{"vertices": {"position": {"type": "Array", "hint": "Float16Array", "item": 3, "data": "ADgAuAAAALgAOAAAALgAuAAAALgAuAEAADgAOAGAADgAuAGAADgAuAAAADgAOAAAALgAOAAAALgAuAEAALgAOAEAADgAOAGA"}, "tcoords": [{"type": "Array", "hint": "Float16Array", "item": 2, "data": "ADyNBo8GADyNBpEGADyNBo8GADyNBpEGADyNBgA8ADyPBgA8ADyNBgA8ADyPBgA8"}]}, "polygons": {"type": "Array", "hint": "Uint16Array", "item": 1, "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsA"}}], "models": {"Plane": {"parent": null, "extra": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": -0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "smooth_normals": false}, "state": {"world_matrix": {"type": "Array", "hint": "Float16Array", "item": 4, "data": "ADwAAAAAAAAAAAA8AAAAAAAAAAAAPAAAAAAAAAAAADw="}}, "struct": 0, "groups": {"default": {"start": 0, "count": 12}}}}, "packed_data": {}}';
+		please.media.assets['square'] = please.gl.__jta_model(square, 'square');
+	}
 	window.graph = new please.SceneGraph();
 	window.camera = new please.CameraNode();
 	graph.add(window.camera);
 	graph.camera = window.camera;
-	if (use_3d) { // {{{
+	if (webgame.use_3d) { // {{{
 		var prog = please.glsl('default', 'simple.vert', 'diffuse.frag');
 		prog.activate();
 		please.set_clear_color(0, 0, 0, 0);
@@ -501,7 +545,7 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		var obj = audio;
 		for (var p = 0; p < path.length - 1; ++p) {
 			if (obj[path[p]] === undefined)
-				obj[path[p]] = {}
+				obj[path[p]] = {};
 			obj = obj[path[p]];
 		}
 		_webgame.audio[a] = please.access(a);
@@ -543,7 +587,10 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 			for (var a = 1; a < arguments.length; ++a)
 				args.push(arguments[a]);
 			//console.info('calling', name, args);
-			window[name].apply(window, args);
+			if (window[name] === undefined)
+				show_chat(null, _('Error: server calls $1, which is undefined')(name))
+			else
+				window[name].apply(window, args);
 		}
 	};
 	_webgame.server = Rpc(messages,
@@ -551,8 +598,23 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		function() { _webgame.body.AddClass('disconnected'); });
 
 	window.AddEvent('resize', _webgame.resize_window);
-	if (!use_3d && window.init_2d !== undefined) window.init_2d();
-	if (use_3d && window.init_3d !== undefined) window.init_3d();
+	var events = ['keydown', 'keyup'];
+	for (var e = 0; e < events.length; ++e) {
+		if ((!webgame.use_3d && window[events[e] + '2d'] !== undefined) || (webgame.use_3d && window[events[e] + '3d'] !== undefined) || window[events[e]] !== undefined) {
+			window.AddEvent(events[e], function(event) {
+				if (document.activeElement.tagName == 'INPUT' || document.activeElement.tagName == 'TEXTAREA' || Public === undefined || Public.name === undefined || Public.name == '')
+					return;
+				if (!webgame.use_3d && window[event.type + '2d'] !== undefined)
+					return window[event.type + '2d'](event);
+				else if (webgame.use_3d && window[events[e] + '3d'] !== undefined)
+					return window[event.type + '3d'](event);
+				else
+					return window[event.type](event);
+			});
+		}
+	}
+	if (!webgame.use_3d && window.init2d !== undefined) window.init2d();
+	if (webgame.use_3d && window.init3d !== undefined) window.init3d();
 	if (window.init !== undefined) window.init();
 })); // }}}
 
@@ -561,7 +623,7 @@ _webgame.id = function(name, num) { // {{{
 	my_name = name;
 	my_num = num;
 	_webgame.update_url();
-} // }}}
+}; // }}}
 
 _webgame.init = function(languages) { // {{{
 	// Set up language select.
@@ -582,6 +644,8 @@ _webgame.init = function(languages) { // {{{
 			}
 		}
 	}
+	if (have_languages.length < 2)
+		document.getElementById('language_selector').AddClass('hidden');
 	_webgame.languages.push('');
 	for (var l = 0; l < have_languages.length; ++l)
 		_webgame.languages.push(have_languages[l]);
@@ -618,22 +682,32 @@ _webgame.init = function(languages) { // {{{
 	_webgame.release = document.getElementById('release');
 	_webgame.players = document.getElementById('players');
 	_webgame.vdiv = document.getElementById('vdiv');
+	_webgame.handle = document.getElementById('handle');
 	_webgame.chatter = document.getElementById('chatter');
-	_webgame.vdiv.AddEvent('mousedown', _webgame.resize_chat);
+	_webgame.handle.AddEvent('mousedown', _webgame.resize_chat);
 	_webgame.game.AddClass('hidden');
-} // }}}
+}; // }}}
 
 _webgame.end = function(result) { // {{{
-	if (window.webgame_end !== undefined)
-		window.webgame_end(result);
-} // }}}
+	dbg('Game ended', result);
+	if (window.end !== undefined)
+		window.end(result);
+	else
+		show_chat(null, _('Game ended. Result: $1')(result));
+}; // }}}
 
-_webgame.server_reply = function() { // {{{
+_webgame.server_reply = function(code) { // {{{
 	if (window.reply !== undefined)
-		window.reply.apply(window.reply, arguments);
-	else if (arguments[0] !== null)
-		alert(_('Server replied: $1')(arguments[0]));
-} // }}}
+		window.reply(code);
+	else if (code !== null) {
+		var reply;
+		if (code.constructor === Array)
+			reply = _(code[0], true).apply(undefined, code.slice(1));
+		else
+			reply = code;
+		alert(_('Server replied: $1')(reply));
+	}
+}; // }}}
 
 // UI.
 _webgame.resize_chat = function(event) { // {{{
@@ -654,34 +728,27 @@ _webgame.resize_chat = function(event) { // {{{
 		event.preventDefault();
 		return false;
 	}
-} // }}}
-
-AddEvent('mgrl_dom_context_changed', function() { // {{{
-	if (window.update_canvas !== undefined && !use_3d)
-		window.update_canvas(please.dom.context);
-}); // }}}
+}; // }}}
 
 _webgame.resize_window = function() { // {{{
 	var size = [_webgame.mainscreen.clientWidth, _webgame.mainscreen.clientHeight];
 	if (size[0] == 0 || size[1] == 0)
 		return;
 	if (_webgame.canvas.width != size[0] || _webgame.canvas.height != size[1]) {
-		if (use_3d) {
+		if (webgame.use_3d) {
 			var max = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
 			if (size[0] > max) {
 				size = [max, size[1] / size[0] * max];
-				//console.info('change size', size);
 			}
 			if (size[1] > max) {
 				size = [size[0] / size[1] * max, max];
-				//console.info('change size', size);
 			}
 		}
 		_webgame.canvas.width = size[0];
 		_webgame.canvas.height = size[1];
 		window.camera.width = _webgame.canvas.width;
 		window.camera.height = _webgame.canvas.height;
-		if (use_3d)
+		if (webgame.use_3d)
 			gl.viewport(0, 0, size[0], size[1]);
 		else {
 			var vw = viewport[2] - viewport[0];
@@ -697,7 +764,7 @@ _webgame.resize_window = function() { // {{{
 		}
 	}
 	please.__align_canvas_overlay();
-} // }}}
+}; // }}}
 
 window.AddEvent('mgrl_overlay_aligned', function() { // {{{
 	for (var c = 0; c < _webgame.canvas_list.length; ++c)
@@ -715,7 +782,7 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 	please.dom.context.fill();
 	if (window.camera !== undefined)
 		please.dom.context.translate(-window.camera.location_x, -window.camera.location_y);
-	if (window.update_canvas !== undefined && !use_3d)
+	if (window.update_canvas !== undefined && !webgame.use_3d)
 		window.update_canvas(please.dom.context);
 }); // }}}
 
@@ -731,7 +798,7 @@ _webgame.set_language = function(language) { // {{{
 		for (var k = 0; k < _translatable[e].length; ++k)
 			_translatable[e][k].ClearAll().AddText(_(e));
 	_webgame.update_url();
-} // }}}
+}; // }}}
 
 _webgame.select_language = function() { // {{{
 	var lang = document.getElementById('language_select').value;
@@ -746,7 +813,7 @@ _webgame.select_language = function() { // {{{
 		window.text_update();
 	else if (window.update !== undefined)
 		window.update();
-} // }}}
+}; // }}}
 
 _webgame.chat_event = function(event) { // {{{
 	if (event.keyCode != 13)
@@ -755,29 +822,29 @@ _webgame.chat_event = function(event) { // {{{
 	event.target.value = '';
 	if (text != '')
 		send_chat(text);
-} // }}}
+}; // }}}
 
 _webgame.change_name = function() { // {{{
 	var name = document.getElementById('playername').value;
 	game('webgame', 'name', name);
-} // }}}
+}; // }}}
 
 // Commands triggered from buttons on website.
 _webgame.title_join = function() { // {{{
 	var which = webgame.title_select.options[webgame.title_select.selectedIndex].value;
 	game('join', which);
-} // }}}
+}; // }}}
 
 _webgame.title_view = function() { // {{{
 	var which = webgame.title_select.options[webgame.title_select.selectedIndex].value;
 	game('view', which);
-} // }}}
+}; // }}}
 
 _webgame.title_new = function() { // {{{
 	var gamename = document.getElementById('title_game_name').value;
 	var num_players = Number(document.getElementById('title_num_players').value);
 	game('new', gamename, num_players);
-} // }}}
+}; // }}}
 
 // Shared object handling.
 _webgame.start = function() { // {{{
@@ -785,9 +852,9 @@ _webgame.start = function() { // {{{
 		console.error('received start command while transaction is in progress.');
 	else
 		_webgame.transaction = {Public: [_webgame.deepcopy(Public), []], Private: [_webgame.deepcopy(Private), []]};
-} // }}}
+}; // }}}
 
-_webgame.finish = function() { // {{{
+_webgame.finish = function(name, args) { // {{{
 	if (_webgame.transaction === undefined) {
 		console.error('received finish command while transaction is not in progress.');
 		return;
@@ -800,8 +867,17 @@ _webgame.finish = function() { // {{{
 		document.title = _webgame.gametitle;
 		_webgame.game.AddClass('hidden');
 		// Clean up old game.
-		if (oldname != '' && window.end_game !== undefined)
+		if (oldname != '' && window.end_game !== undefined) {
+			for (var key in _webgame.ui) {
+				var list = _webgame.ui[key];
+				for (var num = 0; num < list.length; ++num) {
+					if (list[num].node !== undefined)
+						del_div(list[num].node);
+				}
+			}
+			_webgame.ui = {};
 			window.end_game();
+		}
 		// Set number of players for new games.
 		if (Public.min_players == Public.max_players) {
 			document.getElementById('numplayers').AddClass('hidden');
@@ -811,7 +887,7 @@ _webgame.finish = function() { // {{{
 			document.getElementById('numplayers').RemoveClass('hidden');
 			var range = document.getElementById('range');
 			if (Public.max_players === null)
-				range.ClearAll().AddText('(' + Public.max_players + ' or more)');
+				range.ClearAll().AddText('(' + Public.min_players + ' or more)');	// TODO: Make translatable.
 			else
 				range.ClearAll().AddText('(' + Public.min_players + ' - ' + Public.max_players + ')');
 			if (range.value == '')
@@ -881,7 +957,7 @@ _webgame.finish = function() { // {{{
 		document.title = _webgame.gametitle + ' - ' + Public.name;
 		if (window.camera !== undefined)
 			_webgame.resize_window();
-		if (window.update_canvas !== undefined && !use_3d)
+		if (window.update_canvas !== undefined && !webgame.use_3d)
 			window.update_canvas(please.dom.context);
 		if (window.new_game !== undefined)
 			window.new_game();
@@ -965,22 +1041,32 @@ _webgame.finish = function() { // {{{
 		var cb = fire[w][0];
 		var old_value = watch[w][1];
 		var new_value = watch[w][2];
-		cb(new_value, old_value);
+		cb(new_value, old_value, args);
 	}
-	if (window.update !== undefined)
-		window.update();
-} // }}}
+	if (name !== undefined && name !== null && window['update_' + name] !== undefined)
+		window['update_' + name](args);
+	if (window.ui !== undefined)
+		_webgame.update_ui();
+	if (window.update !== undefined) {
+		if (args === null || args === undefined)
+			window.update(name, args);
+		else {
+			args.splice(0, 0, name);
+			window.update.apply(window, args);
+		}
+	}
+}; // }}}
 
 _webgame.deepcopy = function(obj) { // {{{
 	if (typeof obj != 'object' || obj === null)
 		return obj;
-	if (obj.constructor === [].constructor) {
+	if (obj.constructor === Array) {
 		var ret = [];
 		for (var i = 0; i < obj.length; ++i)
 			ret[i] = _webgame.deepcopy(obj[i]);
 		return ret;
 	}
-	else if (obj.constructor === {}.constructor) {
+	else if (obj.constructor === Object) {
 		var ret = {};
 		for (var i in obj)
 			ret[i] = _webgame.deepcopy(obj[i]);
@@ -990,7 +1076,388 @@ _webgame.deepcopy = function(obj) { // {{{
 		console.error('unrecognized object', obj);
 		return obj;
 	}
-} // }}}
+}; // }}}
+
+_webgame.remove_node = function(target) { // {{{
+	if (target.node !== undefined)
+		_webgame.removing.push(target.node);
+	delete target.node;
+}; // }}}
+
+_webgame.update_ui = function() { // {{{
+	// Attributes for ui objects:
+	// path		Where the backing object is, or null if there is none.
+	// location	Where the first object is on screen
+	// offset	How much the screen position changes for each item
+	// class	Class name to use for div
+	// init		Called when object is first created
+	// click	function to call when this object is clicked
+	// virtual	if true, no object is created (but all other handling is performed)
+	// background	value for div.style.background
+	// update	Called at every update.
+	// size		Size of the div (world_w, world_h, pixel_w, pixel_h)
+	// visible	If false, object is hidden.
+	var recursive_remove = function(tree) {
+		if (tree.constructor == Array) {
+			for (var i = 0; i < tree.length; ++i)
+				recursive_remove(tree[i]);
+			return;
+		}
+		_webgame.remove_node(tree);
+	};
+	var make_sources = function(sources, pathstr, base_src, base_target, path, pos, idx) {
+		for (var currentpos = pos; currentpos < path.length; ++currentpos) {
+			if (base_src === undefined) {
+				recursive_remove(base_target);
+				return;
+			}
+			var key = path[currentpos];
+			if (key == '*') {
+				var count;
+				var new_src;
+				if (base_src.constructor === Array) {
+					count = base_src.length;
+					new_src = function(i) { return base_src[i]; };
+				}
+				else {
+					count = base_src;
+					new_src = function(i) { return base_src; };
+				}
+				while (base_target.length > count) {
+					// Source has disappeared; remove target.
+					recursive_remove(base_target.pop());
+				}
+				while (base_target.length < count) {
+					// Source has appeared; add target.
+					base_target.push([]);
+				}
+				for (var i = 0; i < count; ++i) {
+					idx.push(i);
+					make_sources(sources, pathstr, new_src(i), base_target[i], path, currentpos + 1, idx);
+					idx.pop();
+				}
+				return;
+			}
+			base_src = base_src[key];
+		}
+		if (base_target.length == 0)
+			base_target.push({});
+		sources.push({key: pathstr, source: base_src, target: base_target[0], idx: _webgame.deepcopy(idx)});
+	};
+	for (var key in window.ui) {
+		var obj = window.ui[key];
+		var path = key.split('.');
+		var base;
+		var pos = 1;
+		if (path[0] == 'Private')
+			base_src = Private;
+		else if (path[0] == 'Public')
+			base_src = Public;
+		else {
+			base_src = Public;
+			pos = 0;
+		}
+		var sources = [];
+		if (_webgame.ui[key] === undefined)
+			_webgame.ui[key] = [];
+		make_sources(sources, key, base_src, _webgame.ui[key], path, pos, []);
+		for (var i = 0; i < sources.length; ++i)
+			_webgame.handle_ui(key, sources[i]);
+	}
+	while (_webgame.prepare_update.length > 0)
+		_webgame.prepare_update.pop()();
+	while (_webgame.removing.length > 0) {
+		if (webgame.use_3d) {
+			var node = _webgame.removing.pop();
+			if (node.overlay !== undefined) {
+				please.overlay.remove_element(node.overlay.div);
+				node.overlay.destroy();
+			}
+			node.destroy();
+		}
+		else
+			del_div(_webgame.removing.pop());
+	}
+}; // }}}
+
+_webgame.handle_ui = function(key, data) { // {{{
+	// data is {source: object, target: [{node}], idx: array of int}.
+	var obj = window.ui[key];
+	var args = [data.source].concat(data.idx);
+	var get_value = function(attr) {
+		var target;
+		if (webgame.use_3d) {
+			if (obj[attr + '3d'] !== undefined)
+				target = obj[attr + '3d'];
+			else
+				target = obj[attr];
+		}
+		else {
+			if (obj[attr + '2d'] !== undefined)
+				target = obj[attr + '2d'];
+			else
+				target = obj[attr];
+		}
+		if (typeof target == 'function')
+			return target.apply(data.target.node, args);
+		return target;
+	};
+	var use_removed = function(tag, key) {
+		if (_webgame.removing.length <= 0)
+			return null;
+		for (var i = 0; i < _webgame.removing.length; ++i) {
+			if (_webgame.removing[i].tag == tag)
+				return _webgame.removing.splice(i, 1)[0];
+		}
+		for (var i = 0; i < _webgame.removing.length; ++i) {
+			if (_webgame.removing[i].key == key)
+				return _webgame.removing.splice(i, 1)[0];
+		}
+		return _webgame.removing.pop();
+	};
+	var tag = get_value('tag');
+	if (data.target.node !== undefined && data.target.node.tag != tag) {
+		// Remove and add this node, so that shifted lists can be shown as moves.
+		_webgame.remove_node(data.target);
+		delete data.target.node;
+	}
+	_webgame.prepare_update.push(function() {
+		// Compute new location. {{{
+		var compute_location = function() {
+			var offset = get_value('offset');
+			var loc = [];
+			if (offset !== undefined) {
+				if (data.idx.length == 1 && offset[0].constructor !== Array)
+					offset = [offset];
+				else if (offset.length != data.idx.length)
+					console.error('incorrect offset value for', key, '; should be array of', data.idx.length, 'arrays of 3 coordinates, not:', offset);
+			}
+			var the_location = get_value('location');
+			if (the_location === undefined)
+				the_location = [0, 0, 0];
+			for (var i = 0; i < 3; ++i) {
+				loc.push(the_location[i]);
+				if (offset !== undefined) {
+					for (var j = 0; j < data.idx.length; ++j) {
+						if (offset[j] !== null)
+							loc[i] += data.idx[j] * offset[j][i];
+					}
+				}
+			}
+			return loc;
+		}
+		var current = (data.target.node === undefined ? [0, 0, 0] : data.target.node.location);
+		var loc = compute_location();
+		var move_needed = false;
+		for (var i = 0; i < 3; ++i) {
+			if (loc[i] != current[i])
+				move_needed = true;
+		}
+		// }}}
+		var set_location = function() { // Move to new location and call finish(). {{{
+			var time = get_value('time');
+			if (time === undefined)
+				time = .3;
+			if (move_needed && time > 0) {
+				move_node(data.target.node, compute_location(), time, finish);
+			}
+			else {
+				data.target.node.location = compute_location();
+				finish();
+			}
+		}; // }}}
+		var finish = function() {
+			if (data.target.node === undefined)
+				return;
+			if (data.target.node.pending !== undefined) {
+				var old = data.target.node;
+				if (old.overlay !== undefined) {
+					please.overlay.remove_element(old.overlay.div);
+					old.overlay.destroy();
+				}
+				var pending = old.pending;
+				delete old.pending;
+				old.destroy();
+				delete data.target.node;
+				pending();
+			}
+			var target;
+			if (webgame.use_3d) {
+				target = data.target.node.overlay;
+				var overlay = get_value('overlay');
+				if (overlay !== undefined)
+					target.location = overlay;
+			}
+			else
+				target = data.target.node;
+			if (target !== undefined) {
+				var text = get_value('text');
+				if (text !== undefined)
+					target.div.ClearAll().AddText(text);
+				var className = get_value('class');
+				if (className !== undefined) {
+					if (typeof className == 'string')
+						className = className.split(' ');
+					var classes = _webgame.deepcopy(target.classes);
+					for (var i = 0; i < className.length; ++i) {
+						if (className[i] == '')
+							continue;
+						target.classes[className[i]] = true;
+						target.div.AddClass(className[i]);
+						if (classes[className[i]])
+							delete classes[className[i]];
+					}
+					for (var i in classes) {
+						if (i == '')
+							continue;
+						target.div.RemoveClass(i);
+						delete target.classes[i];
+					}
+				}
+				var style = get_value('style');
+				if (style !== undefined) {
+					for (var s in style)
+						target.div.style[s] = style[s];
+				}
+				var image = get_value('image');
+				if (image !== undefined && image !== null)
+					target.div.style.backgroundImage = 'url(webgame/img/' + image + ')';
+			}
+			data.target.node.tag = tag;
+			var visible = get_value('visible');
+			visible = (visible === undefined ? true : visible);
+			data.target.node.visible = visible;
+			if (data.target.node.overlay !== undefined)
+				data.target.node.overlay.visible = visible;
+		};
+		if (data.target.node === undefined) {
+			// Create this node. {{{
+			var create_div = function() {
+				var size = get_value('size');
+				if (size !== undefined) {
+					var node = new_div.apply(undefined, size);
+					node.classes = {};
+					node.div.style.backgroundSize = size[2] + 'px,' + size[3] + 'px';
+					return node;
+				}
+				else {
+					var node = new please.GraphNode();
+					node.classes = {};
+					node.div = please.overlay.new_element();
+					node.div.bind_to_node(node);
+					node.div.AddEvent('click', function(event) {
+						if (!node.selectable)
+							return;
+						node.dispatch('click', event);
+					});
+					console.info('div created');
+					return node;
+				}
+			};
+			if (!webgame.use_3d) {
+				data.target.node = use_removed(tag, key);
+				if (data.target.node === null) {
+					data.target.node = create_div();
+					data.target.node.location = compute_location();
+				}
+				else {
+					// Remove class and content.
+					data.target.node.ClearAll().className = '';
+				}
+				data.target.node.key = key;
+				data.target.node.idx = data.idx;
+				if (obj.click !== undefined) {
+					data.target.node.selectable = true;
+					data.target.node.on_click = function(event) {
+						// Call click() with the standard arguments; ignore return value.
+						get_value('click');
+					};
+				}
+				// Call init() with the standard arguments; ignore return values.
+				get_value('init');
+				get_value('update');
+				set_location();
+			}
+			else {
+				var create_node = function() {
+					// If model is defined, use it.
+					// If overlay or text is also defined, add an overlay.
+					// If size is defined, but not model, create a rectangle.
+					var model = get_value('model');
+					var overlay = get_value('overlay');
+					var text = get_value('text');
+					if (model !== undefined) {
+						data.target.node = please.access(model).instance();
+					}
+					else {
+						var size = get_value('size');
+						if (size !== undefined) {
+							data.target.node = please.access('square').instance();
+							data.target.node.scale = [size[0], size[1], 1];
+							if (data.target.node.shader === undefined)
+								data.target.node.shader = {};
+							var image = get_value('image');
+							if (image !== undefined)
+								data.target.node.shader.diffuse_texture = image;
+							else {
+								var tname = 'blank-' + size[2] + '-' + size[3];
+								if (please.media.assets[tname] === undefined) {
+									var canvas = Create('canvas');
+									canvas.width = size[2];
+									canvas.height = size[3];
+									please.media.assets[tname] = canvas;
+								}
+								data.target.node.shader.diffuse_texture = tname;
+							}
+						}
+						else {
+							dbg('no model or size defined for', key, data.idx);
+							return;
+						}
+					}
+					if (overlay !== undefined || text !== undefined) {
+						data.target.node.overlay = create_div();
+						data.target.node.add(data.target.node.overlay);
+					}
+					graph.add(data.target.node);
+					data.target.node.location = compute_location();
+					data.target.node.key = key;
+					data.target.node.idx = data.idx;
+					if (obj.click !== undefined) {
+						data.target.node.selectable = true;
+						data.target.node.on_click = function(event) {
+							// Call click() with the standard arguments; ignore return value.
+							get_value('click');
+						};
+						graph.picking.enabled = true;
+					}
+					// Call init() with the standard arguments; ignore return values.
+					get_value('init');
+					get_value('update');
+				};
+				// Use properties from old object if it exists.
+				var old = use_removed(tag, key);
+				if (old !== null) {
+					if (data.target.node !== undefined && data.target.node.pending !== undefined) {
+						// Pending node is replaced; nothing to do.
+					}
+					old.pending = create_node;
+					data.target.node = old;
+					set_location();
+				}
+				else
+					create_node();
+			}
+			// }}}
+		}
+		else {
+			// Call update() with the standard arguments; ignore return values.
+			get_value('update');
+			// Move to new location and call finish().
+			set_location();
+		}
+	});
+}; // }}}
 
 _webgame.update = function(is_public, path, value) { // {{{
 	//console.info('update', is_public, path, value);
@@ -1020,7 +1487,7 @@ _webgame.update = function(is_public, path, value) { // {{{
 		Public = value;
 	else
 		Private = value;
-} // }}}
+}; // }}}
 
 _webgame.Public_update = function(path, value) { // {{{
 	//console.info('update', path, value);
@@ -1031,7 +1498,7 @@ _webgame.Public_update = function(path, value) { // {{{
 	}
 	else
 		_webgame.update(true, path, value);
-} // }}}
+}; // }}}
 
 _webgame.Private_update = function(path, value) { // {{{
 	if (_webgame.transaction === undefined) {
@@ -1041,7 +1508,7 @@ _webgame.Private_update = function(path, value) { // {{{
 	}
 	else
 		_webgame.update(false, path, value);
-} // }}}
+}; // }}}
 
 // Other.
 _webgame.update_url = function() { // {{{
@@ -1052,6 +1519,18 @@ _webgame.update_url = function() { // {{{
 		lang = '';
 	else
 		lang = '&lang=' + encodeURIComponent(_webgame.language);
-	history.replaceState(null, document.title, document.location.protocol + '//' + document.location.host + '/?name=' + encodeURIComponent(my_name) + lang);
-} // }}}
+	var force_2d;
+	if (_webgame.force_2d)
+		force_2d = '&2d=1';
+	else
+		force_2d = '';
+	history.replaceState(null, document.title, document.location.protocol + '//' + document.location.host + document.location.pathname + '?name=' + encodeURIComponent(my_name) + lang + force_2d);
+}; // }}}
 // }}}
+
+function dbg() {
+	var p = ['Debug'];
+	for (var i = 0; i < arguments.length; ++i)
+		p.push(_webgame.deepcopy(arguments[i]));
+	console.debug.apply(this, p);
+}

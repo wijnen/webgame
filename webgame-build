@@ -53,6 +53,7 @@ fhs.option('name', 'game name (default is program name)', default = '')
 fhs.option('base', 'website base URI', default = '')
 fhs.option('build-only', 'do not run the game after building', argtype = bool)
 fhs.option('forbidden-exts', 'never load files with these extentions (comma-separated list)', default = '.blend,.blend1,~')
+fhs.option('port', 'run on this port')
 config = fhs.init(game = True, packagename = 'python3-webgame')
 forbidden_exts = config['forbidden-exts'].split(',')
 # }}}
@@ -264,7 +265,7 @@ for m in sys.modules:
 
 # Run. {{{
 if not config['build-only']:
-	subprocess.Popen([os.path.join(dest, main)], close_fds = True).communicate()
+	subprocess.Popen([os.path.join(dest, main)] + ([] if config['port'] is None else ['--webgame-port', config['port']]), close_fds = True).communicate()
 # }}}
 
 # vim: set foldmethod=marker :

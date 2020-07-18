@@ -251,6 +251,10 @@ class Shared_Array(collections.abc.MutableSequence): # {{{
 					self.target.connection._socket.webgame.event('Private_update', path, len(self.data))
 	def __lt__(self, other):
 		return list(self) < list(other)
+	def __eq__(self, other):
+		if not isinstance(other, (list, Shared_Array)):
+			return False
+		return list(self) == list(other)
 	def __len__(self):
 		return len(self.data)
 	def insert(self, index, obj):
@@ -399,12 +403,38 @@ class Task: # Class for parallel tasks. {{{
 	It can be a timeout or an input event.
 	See details in Instance.run(), or the system documentation.
 	'''
-	def __init__(self, generator, name):
+	def __init__(self, instance, generator, name):
+		self.instance = instance
 		self.generator = generator
+		self.running = False
 		self.name = name
 		self.waiters = []
 		self.done = False
 		self.value = None
+		self.idle_pending = None
+		self.queue_pending = []
+	def stop(self):
+		assert not self.running
+		self.instance.cleanup(self)
+		self.instance.tasks.remove(self)
+
+def schedule(task, arg, check = None, wake = None):
+	'''Schedule an instance to run a task with argument.
+	If another call is already scheduled, drop this one.'''
+	if task.idle_pending is not None:
+		return False
+	def run():
+		task.idle_pending = None
+		task.instance.run(task, arg, check, wake)
+	task.idle_pending = websocketd.add_idle(run)
+	return True
+
+def queue(task, arg, check, wake):
+	'''Schedule an instance to run a task with argument.
+	If another call is already scheduled, queue this one for later.'''
+	if schedule(task, arg, check, wake):
+		return
+	task.queue_pending.append((arg, check, wake))
 # }}}
 
 class Instance: # Class for game instances. {{{
@@ -423,6 +453,7 @@ class Instance: # Class for game instances. {{{
 		self.tasks = []
 		self.game = cls()
 		self.game.launch = self.launch
+		self.game.stop_all_tasks = self.stop_all_tasks
 		self.game.pause = self.pause
 		n = name
 		i = 0
@@ -468,6 +499,7 @@ class Instance: # Class for game instances. {{{
 			return
 		log("stopped instance '{0}'".format(self.game.Public.name))
 		del instances[self.game.Public.name]
+		self.stop_all_tasks()
 		for c in connections:
 			if connections[c]._instance != self:
 				continue
@@ -488,7 +520,7 @@ class Instance: # Class for game instances. {{{
 		if all(p.connection is None for p in self.game.players):
 			self.close()
 
-	def run(self, task, arg):
+	def run(self, task, arg, check, wake):
 		'''Run a task of this instance.
 		This is called when a task is launched, and when it is resumed for any reason.
 		when it is launched, arg is None.
@@ -496,7 +528,19 @@ class Instance: # Class for game instances. {{{
 		when it is resumed because a task that was waited for has finished, arg is the return value.
 		when it is resumed because a client made a call, arg is an args dict as defined in Connection.__getattr__.wrap().
 		'''
+		if check is not None:
+			canrun = check(task)
+			if canrun is not True:
+				while len(task.queue_pending) > 0:
+					arg, check, wake = task.queue_pending.pop(0)
+					if check(task) is True:
+						break
+				else:
+					return
+			task.reply = wake
 		self.cleanup(task)
+		if len(task.queue_pending) > 0:
+			schedule(task, *task.queue_pending.pop(0))
 		self.game.now = time.time()
 		end_task = (False, None)
 		def reply(*ret):
@@ -506,6 +550,7 @@ class Instance: # Class for game instances. {{{
 			task.reply = None
 		self.game.reply = reply
 		transaction.enter(self)
+		task.running = True
 		try:
 			#log('sending {0}'.format(repr(arg)))
 			cmd = task.generator.send(arg)
@@ -513,6 +558,7 @@ class Instance: # Class for game instances. {{{
 			task.value = e.value
 			task.done = True
 			end_task = (True, e.value)
+		task.running = False
 		transaction.leave(self)
 		del self.game.reply
 		if hasattr(task, 'reply'):
@@ -522,7 +568,8 @@ class Instance: # Class for game instances. {{{
 		#log('cmd = {0}'.format(repr(cmd)))
 		if end_task[0] or cmd is None:
 			for t in task.waiters:
-				websocketd.add_idle(lambda: self.run(t, end_task[1]))
+				# task died and t wants to know. schedule notification.
+				schedule(t, end_task[1])
 			self.tasks.remove(task)
 			if len(self.tasks) == 0:
 				self.end_game(end_task[1])
@@ -533,16 +580,17 @@ class Instance: # Class for game instances. {{{
 		if isinstance(cmd, (tuple, list, set, frozenset)):
 			def mkcmd(src):
 				for c in src:
-					if isinstance(c, (Task, str)):
-						yield (c, None)
-					else:
+					if isinstance(c, (int, float)):
 						yield (None, c)
+					else:
+						yield (c, None)
 			cmd = {x: y for x, y in mkcmd(cmd)}
 		#log('new cmd: {0}'.format(repr(cmd)))
 		# Check if we're waiting for a task that is already finished.
 		for c in cmd:
 			if isinstance(c, Task) and c.done:
-				websocketd.add_idle(lambda: self.run(task, c.value))
+				# task died earlier but t still wants to know. schedule notification.
+				schedule(task, c.value)
 				return
 		# Schedule new timeout.
 		if None in cmd:
@@ -550,7 +598,7 @@ class Instance: # Class for game instances. {{{
 			# If t is less than a year after the epoch, use it as a timeout from now. Otherwise use it as absolute time.
 			if t < 3600 * 24 * 365.25:
 				t += self.game.now
-			self.timeouts[task] = websocketd.add_timeout(t, lambda: self.timeouts.pop(task) and self.run(task, None))
+			self.timeouts[task] = websocketd.add_timeout(t, lambda: self.timeouts.pop(task) and self.run(task, None, None, None))
 		# Add waiters to tasks.
 		for c in cmd:
 			if not isinstance(c, Task):
@@ -589,6 +637,7 @@ class Instance: # Class for game instances. {{{
 		'''Remove task and clean up everything.
 		This happens any time a task is resumed.
 		Things are set back up when it yields.
+		Pending calls remain pending.
 		Example value for self.cmds: {'play': {task: [0, [int, bool]]}} (player 0 may use the play(int, bool) command, registered by task)
 		'''
 		prepare_actions = {}
@@ -605,6 +654,9 @@ class Instance: # Class for game instances. {{{
 			self.game.players[p].Private.actions = prepare_actions[p]
 		if task in self.timeouts:
 			websocketd.remove_timeout(self.timeouts.pop(task))
+		if task.idle_pending is not None:
+			websocketd.remove_idle(task.idle_pending)
+			task.idle_pending = None
 		for t in [x for x in self.tasks if task in x.waiters]:
 			t.remove(task)
 
@@ -663,13 +715,22 @@ class Instance: # Class for game instances. {{{
 		Otherwise, it will be registered for starting when idle.
 		This function can be called from the Game class.
 		'''
-		t = Task(f, name if name is not None else 'Nameless Task')
+		t = Task(self, f, name if name is not None else 'Nameless Task')
 		self.tasks.append(t)
 		if run_now:
-			self.run(t, None)
+			self.run(t, None, None, None)
 		else:
-			websocketd.add_idle(lambda: self.run(t, None))
+			# schedule initial run of task.
+			schedule(t, None)
 		return t
+
+	def stop_all_tasks(self):
+		for t in self.tasks[:]:
+			if t.running:
+				#log('not stopping running task %s' % t.name)
+				continue
+			#log('stopping task %s' % t.name)
+			t.stop()
 
 	def pause(self, seconds):
 		'''Pause the game until all players have responded or the timeout expired.
@@ -704,13 +765,13 @@ class Instance: # Class for game instances. {{{
 	def check_args(self, argdecl, a, ka):
 		if argdecl is None:
 			return True
-		if len(ka) > 0:
-			return False
 		# If the command exists and is valid for this player, but the arguments are wrong, notify player.
+		if len(ka) > 0:
+			return _('Function $1 called with keyword arguments: $2'), (repr(ka),)
 		if len(a) != len(argdecl):
-			return _('incorrect number of arguments to function {0} (given {1}, expected {2})'), (len(a), len(argdecl))
+			return _('incorrect number of arguments to function $1 (given $2, expected $3)'), (len(a), len(argdecl))
 		if any(decl is not None and not isinstance(arg, decl) for arg, decl in zip(a, argdecl)):
-			return _('incorrect argument type given to function {0}'), ()
+			return _('incorrect argument type given to function $1'), ()
 		return True
 # }}}
 
@@ -764,7 +825,7 @@ class Connection: # {{{
 				languages.remove(language)
 			languages.insert(0, socket.data['query']['language'])
 		self._socket.webgame.event('id', self._name, None)
-		self._socket.webgame.event('init', languages)	# TODO: Add use3d, file list and audio.
+		self._socket.webgame.event('init', languages)
 		broadcast_shared(self, ['Public'], self._instance.game.Public)
 		broadcast_shared(self, ['Private'], None, title_game.game.Public.name)
 	def _closed(self):
@@ -791,10 +852,10 @@ class Connection: # {{{
 		if attr.startswith('_'):
 			raise AttributeError('invalid attribute name for getattr')
 		if attr in cmds:
-			queue = cmds[attr]
+			targets = cmds[attr]
 			instance = None
 		elif self._instance is not None and attr in self._instance.cmds:
-			queue = self._instance.cmds[attr]
+			targets = self._instance.cmds[attr]
 			instance = self._instance
 		else:
 			# This may happen due to the asynchronous communication, so it should not produce an error for the user.
@@ -802,28 +863,39 @@ class Connection: # {{{
 			return
 		def wrap(*a, **ka):
 			wake = (yield)
-			for task in queue.copy(): # Try to run this command on any task, until it is allowed.
-				func, funcargs = queue[task]
-				if isinstance(func, (tuple, list, set, frozenset)):
-					if self._num not in func:
-						continue
-					func = None
+			def check_task(task):
+				if attr not in task.instance.cmds or task not in task.instance.cmds[attr]:
+					log('wrong attr: %s not in %s + %s' % (attr, repr(task.instance.cmds), None if attr not in task.instance.cmds else repr(task.instance.cmds[attr])))
+					return False
+				who, funcargs = task.instance.cmds[attr][task]
+				if isinstance(who, (tuple, list, set, frozenset)):
+					if self._num not in who:
+						return False
+					who = None
 				check = self._instance.check_args(funcargs, a, ka)
-				if check is False:
-					log('warning: %s called %s with wrong arguments' % self._name, attr)
-					continue
-				if check is not True:
-					# This error should be passed to the player.
-					if hasattr(self._instance.game, 'error'):
-						return self_instance.game.error(self, check[0], (attr,) + check[1])
-					return check[0], (attr,) + check[1]
+				if check is True:
+					return True
+				# This error should be passed to the player.
+				if hasattr(self._instance.game, 'error'):
+					return self_instance.game.error(self, check[0], *((attr,) + check[1]))
+				return (check[0], attr) + check[1]
+			for task in targets.copy(): # Try to run this command on any task, until it is allowed.
+				if task is None:
+					who, funcargs = cmds[attr][None]
+				else:
+					who, funcargs = task.instance.cmds[attr][task]
+					check = check_task(task)
+					if check is False:
+						continue
+					if check is not True:
+						return check
 				args = {'args': Args(a, ka), 'connection': self, 'player': self._num, 'command': attr}
-				if func is not None:
-					websocketd.add_idle(lambda: wake(func(args)))
+				if who is not None and not isinstance(who, (tuple, list, set, frozenset)):
+					# Connection has requested to run a function. Schedule it.
+					websocketd.add_idle(lambda: wake(who(args)))
 				elif task is not None:
-					instance.cleanup(task);
-					task.reply = wake
-					websocketd.add_idle(lambda: instance.run(task, args))
+					# Connection has requested to wake a task. Schedule it.
+					queue(task, args, check_task, wake)
 				return (yield)
 			# This may happen due to the asynchronous communication, so it should not produce an error for the user.
 			log('ignoring invalid command {} from {}'.format(attr, self._name))
@@ -862,7 +934,7 @@ class Title: # Class for default title game object. {{{
 				cmd['args'][0] = i.game.Public.name
 				i.game.Public.owner = 0
 				command = 'join'	# fall through.
-			if cmd['args'][0] not in instances:
+			if not isinstance(cmd['args'][0], str) or cmd['args'][0] not in instances:
 				connection._instance.game.reply(_("game doesn't exist"))
 				continue
 			instance = instances[cmd['args'][0]]
@@ -978,23 +1050,47 @@ def admin(args): # {{{
 class Transaction:	# Singleton class {{{
 	def __init__(self):
 		self.instance = None
-		self.started = False
+		self.phase = 'idle'
+		self.name = None
+		self.args = None
+	def enter(self, instance):
+		assert self.instance is None
+		assert self.args is None
+		assert self.phase == 'idle'
+		self.phase = 'ready'
+		self.instance = instance
 	def __enter__(self):
 		assert self.instance is not None
-		assert not self.started
-		self.started = True
+		assert self.phase in ('ready', 'calling', 'called')
+		self.phase = 'busy'
 		self.instance.game.broadcast.webgame('start')
 	def __exit__(self, *exc):
 		assert self.instance is not None
-		assert self.started
-		self.started = False
-		self.instance.game.broadcast.webgame('finish')
-	def enter(self, instance):
-		assert self.instance is None
-		self.instance = instance
+		assert self.phase == 'busy'
+		self.phase = 'ready'
+		self.instance.game.broadcast.webgame('finish', self.name, self.args)
+		self.name = None
+		self.args = None
 	def leave(self, instance):
 		assert self.instance is instance
+		assert self.phase == 'ready'
+		self.phase = 'idle'
 		self.instance = None
+	def __call__(self, *args):
+		assert self.instance is not None
+		assert self.phase == 'calling'
+		assert self.args is None
+		self.phase = 'called'
+		self.args = args
+		return self
+	def __getattr__(self, attr):
+		assert self.instance is not None
+		assert self.phase == 'ready'
+		assert self.name is None
+		self.name = attr
+		self.phase = 'calling'
+		return self
+
 transaction = Transaction()
 # }}}
 
@@ -1074,7 +1170,7 @@ def Game(): # Main function to start a game. {{{
 	# Start up websockets server.
 	config = fhs.module_get_config('webgame')
 	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html', os.path.join('html', game.name.lower()))]
-	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = sum(httpdirs, []))
+	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = sum(httpdirs, []), proxy = 'game')
 	server.handle_ext('png', 'image/png')
 	server.handle_ext('svg', 'image/svg+xml')
 	server.handle_ext('jpg', 'image/jpeg')

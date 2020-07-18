@@ -24,8 +24,17 @@ body {
 	right: 0px;
 }
 
+#handle {
+	position:absolute;
+	background: #666;
+	top: 0px;
+	bottom: 0px;
+	left: var(--width);
+	width: 1ex;
+}
+
 #main {
-	position: fixed;
+	position: absolute;
 	top: 0px;
 	left: 0px;
 	bottom: 0px;
@@ -116,7 +125,7 @@ body {
 
 :root {
 	--sidewidth: 25em;
-	--extra: 3em;
+	--extra: 2em;
 	--sidecolor: #dfd;
 }
 
@@ -147,8 +156,8 @@ body {
 #sidebarhider {
 	float: right;
 	border-radius: 1ex;
-	margin-right: calc(var(--extra) * -1 - 1em);
-	padding: 1em;
+	margin-right: calc(var(--extra) * -1 - 1.5ex);
+	padding: 1ex 1ex 1ex 1em;
 	background: var(--sidecolor);
 }
 

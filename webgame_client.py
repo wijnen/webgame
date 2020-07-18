@@ -43,7 +43,7 @@ if not hasattr(__main__, 'names'):
 class Undefined:
 	def __bool__(self):
 		return False
-undefined = Undefined()
+__main__.undefined = Undefined()
 
 def _is_shared(obj):
 	return isinstance(obj, (Shared_Array, Shared_Object))
@@ -76,6 +76,8 @@ class Shared_Object(dict):
 			for key in base:
 				self[key] = base[key]
 	def __getattr__(self, attr):
+		if attr not in super().keys():
+			return __main__.undefined
 		return self[attr]
 	def __setattr__(self, attr, value):
 		self[attr] = value
@@ -115,7 +117,7 @@ class AI:
 			self._Public_update(arg1, arg2)
 		elif func == 'Private_update':
 			self._Private_update(arg1, arg2)
-	def _Public_update(self, path, value = undefined):
+	def _Public_update(self, path, value = __main__.undefined):
 		changes = self._update([__main__.Public], path, value)
 		# Connect only once.
 		if __main__.Public.name == '':
@@ -150,7 +152,7 @@ class AI:
 					self._make_changes({}, __main__.Private, private_changes, [])
 					self._do_private_update(private_changes)
 			self._do_public_update(changes)
-	def _Private_update(self, path, value = undefined):
+	def _Private_update(self, path, value = __main__.undefined):
 		changes = self._update([__main__.Private], path, value)
 		if __main__.Public['name'] != '':
 			self._do_private_update(changes)
@@ -219,40 +221,48 @@ class AI:
 					if p not in c:
 						c[p] = {}
 					c = c[p]
-				if (isinstance(obj, dict) and path[-1] in obj) or (isinstance(obj, list) and path[-1] < len(obj)):
+				if isinstance(obj, list) and path[-1] == 'length':
+					# The list length has changed; handle that.
+					if value < len(obj):
+						for i in range(value, len(obj)):
+							c[i] = obj[i]
+					elif value > len(obj):
+						for i in range(len(obj), value):
+							c[i] = __main__.undefined
+				elif (isinstance(obj, dict) and path[-1] in obj) or (isinstance(obj, list) and path[-1] < len(obj)):
 					# This is an object in a dict or list; record old value.
 					c[path[-1]] = obj[path[-1]]
 				else:
 					# This object didn't exist; record that.
-					c[path[-1]] = undefined
+					c[path[-1]] = __main__.undefined
 			return
-		obj = obj[path[-1]] if obj and len(path) > 0 and path[-1] in obj else undefined
+		obj = obj[path[-1]] if obj and len(path) > 0 and path[-1] in obj else __main__.undefined
 		# Fill changes based on value.
 		if isinstance(value, dict):
 			# Value is a dict; recursively fill changes.
 			for v in value:
 				path.append(v)
-				self._make_changes(obj[v] if obj and v in obj else undefined, value[v], changes, path)
+				self._make_changes(obj[v] if obj and v in obj else __main__.undefined, value[v], changes, path)
 				path.pop()
 		else:
 			# Value is a list; recursively fill changes.
 			for i, v in enumerate(value):
 				path.append(i)
-				self._make_changes(obj[i] if obj and i < len(obj) else undefined, v, changes, path)
+				self._make_changes(obj[i] if obj and i < len(obj) else __main__.undefined, v, changes, path)
 				path.pop()
 		# Fill changes based on obj.
 		if isinstance(obj, dict):
 			for v in obj:
 				# Ignore parts that have been filled by value.
-				if value is not undefined and v in value:
+				if value is not __main__.undefined and v in value:
 					continue
 				path.append(v)
-				self._make_changes(obj[v], undefined, changes, path)
+				self._make_changes(obj[v], __main__.undefined, changes, path)
 				path.pop()
 		elif isinstance(obj, list):
-			for i in range(len(obj) - 1, len(value) if value is not undefined else 0, -1):
+			for i in range(len(obj) - 1, len(value) if value is not __main__.undefined else 0, -1):
 				path.append(i)
-				self._make_changes(obj[i], undefined, changes, path)
+				self._make_changes(obj[i], __main__.undefined, changes, path)
 				path.pop()
 	def _update(self, obj, path, value):
 		target = obj[0]
@@ -261,18 +271,14 @@ class AI:
 		if path != []:
 			changes = {}
 			self._make_changes(target, value, changes, path)
-			if isinstance(target, list) and path[-1] == len(target):
-				if value is not undefined:
-					target.append(value)
-				elif path[-1] == len(target) - 1:
-					target.pop()
-				else:
-					raise ValueError('trying to remove object from inside list')
+			if isinstance(target, list) and path[-1] == 'length':
+				if value < len(target):
+					for i in range(value, len(target)):
+						target.pop()
+				elif value > len(target):
+					target += [undefined for n in range(value - len(target))]
 			else:
-				if value is not undefined:
-					target[path[-1]] = value
-				else:
-					del target[path[-1]]
+				target[path[-1]] = value
 		elif obj[0] is __main__.Public:
 			changes = __main__.Public
 			__main__.Public = _make_shared(value)
