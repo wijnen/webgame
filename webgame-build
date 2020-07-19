@@ -250,7 +250,7 @@ mydir = os.path.realpath(os.path.dirname(sys.argv[0]))
 for m in sys.modules:
 	if m == '__main__':
 		continue
-	if not hasattr(sys.modules[m], '__file__'):
+	if not hasattr(sys.modules[m], '__file__') or sys.modules[m].__file__ is None:
 		#log('no file: {}'.format(m))
 		continue
 	if os.path.realpath(os.path.dirname(sys.modules[m].__file__)) != mydir:

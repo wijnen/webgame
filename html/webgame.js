@@ -995,6 +995,11 @@ _webgame.finish = function(name, args) { // {{{
 		button.type = 'button';
 		button.num = num;
 		button.AddEvent('click', function() { game('webgame', 'kick', this.num); });
+		var swap = tr.AddElement('td', 'swap');
+		var button = swap.AddElement('button').AddText(_('Swap'));
+		button.type = 'button';
+		button.num = num;
+		button.AddEvent('click', function() { game('webgame', 'swap', my_num, this.num); });
 		_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kick});
 	}
 	for (var i = 0; i < _webgame.playerrows.length; ++i) {
@@ -1183,9 +1188,9 @@ _webgame.update_ui = function() { // {{{
 _webgame.handle_ui = function(key, data) { // {{{
 	// data is {source: object, target: [{node}], idx: array of int}.
 	var obj = window.ui[key];
-	var args = [data.source].concat(data.idx);
 	var get_value = function(attr) {
 		var target;
+		var args = [data.source].concat(data.idx);
 		if (webgame.use_3d) {
 			if (obj[attr + '3d'] !== undefined)
 				target = obj[attr + '3d'];
@@ -1451,6 +1456,16 @@ _webgame.handle_ui = function(key, data) { // {{{
 			// }}}
 		}
 		else {
+			// Update the click callback so it uses the new src value when called.
+			if (obj.click !== undefined) {
+				data.target.node.selectable = true;
+				data.target.node.on_click = function(event) {
+					// Call click() with the standard arguments; ignore return value.
+					get_value('click');
+				};
+			}
+			else
+				data.target.node.selectable = false;
 			// Call update() with the standard arguments; ignore return values.
 			get_value('update');
 			// Move to new location and call finish().

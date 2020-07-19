@@ -141,7 +141,7 @@ body {
 	max-width: 99%;
 }
 
-#players > tr > td.kick {
+#players > tr > td.kick, #players > tr > td.swap {
 	width: 4em;
 }
 
