@@ -1000,7 +1000,7 @@ _webgame.finish = function(name, args) { // {{{
 		button.type = 'button';
 		button.num = num;
 		button.AddEvent('click', function() { game('webgame', 'swap', my_num, this.num); });
-		_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kick});
+		_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kick, swap: swap});
 	}
 	for (var i = 0; i < _webgame.playerrows.length; ++i) {
 		var p = _webgame.playerrows[i];
@@ -1013,6 +1013,10 @@ _webgame.finish = function(name, args) { // {{{
 			p.kick.RemoveClass('hidden');
 		else
 			p.kick.AddClass('hidden');
+		if (my_num !== null && i != my_num && (p.nametext === null || Public.owner == my_num))
+			p.swap.RemoveClass('hidden');
+		else
+			p.swap.AddClass('hidden');
 	}
 	// Check watch events.
 	// Fire them in a separate loop, to avoid unexpected behavior when the watch list is changed from a callback.
@@ -1112,7 +1116,7 @@ _webgame.update_ui = function() { // {{{
 	};
 	var make_sources = function(sources, pathstr, base_src, base_target, path, pos, idx) {
 		for (var currentpos = pos; currentpos < path.length; ++currentpos) {
-			if (base_src === undefined) {
+			if (base_src === undefined || base_src === null) {
 				recursive_remove(base_target);
 				return;
 			}
