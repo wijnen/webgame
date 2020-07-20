@@ -1045,6 +1045,8 @@ def admin(args): # {{{
 	elif cmd[0] == 'chat':
 		connection._instance.game.broadcast.webgame('chat', connection._num if connection._num is not None else connection._name, cmd[1])
 	elif cmd[0] == 'swap':
+		if connection._num is None:
+			return _('Watchers cannot swap with players')
 		the_game = connection._instance.game
 		num = len(the_game.players)
 		srcnum = connection._num if len(cmd) < 2 or not isinstance(cmd[1], int) or not 0 <= cmd[1] < num else cmd[1]
