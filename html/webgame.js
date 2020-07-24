@@ -1027,7 +1027,7 @@ _webgame.finish = function(name, args) { // {{{
 		var button = swap.AddElement('button').AddText(_('Swap'));
 		button.type = 'button';
 		button.num = num;
-		button.AddEvent('click', function() { game('webgame', 'swap', my_num, this.num); });
+		button.AddEvent('click', function() { game('webgame', 'swap', this.num); });
 		_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kick, swap: swap});
 	}
 	for (var i = 0; i < _webgame.playerrows.length; ++i) {
