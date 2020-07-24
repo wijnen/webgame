@@ -3,18 +3,6 @@
 
 // Functions and variables which can be replaced by user code. {{{
 
-var mouse_navigation = true;
-var show_players = false;	// If true, show the player list at bottom.
-
-Object.defineProperty(window, "viewport", {
-	enumerable: true,
-	get: function() { return _webgame.viewport; },
-	set: function(value) {
-		_webgame.viewport = value;
-		_webgame.update_camera();
-	}
-});
-
 function playercolor(num) { // {{{
 	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
 	num %= colors.length;
@@ -55,8 +43,18 @@ var webgame = {
 	use_3d: true,			// If true, the interface is 3d. Otherwise, it is 2d.
 	title_gamelist: [],		// Games which are available in the title screen.
 	title_select: undefined,	// Select element on title screen (for changing style).
-	args: undefined			// Object containing search string as key-value pairs. A null value means there was no argument.
+	args: undefined,		// Object containing search string as key-value pairs. A null value means there was no argument.
+	mouse_navigation: true		// If true, allow changing the view with the mouse.
 };
+
+Object.defineProperty(webgame, "viewport", {
+	enumerable: true,
+	get: function() { return _webgame.viewport; },
+	set: function(value) {
+		_webgame.viewport = value;
+		_webgame.resize_window(true);
+	}
+});
 
 function game(target) { // {{{
 	var args = [];
@@ -370,10 +368,10 @@ _webgame.update_camera = function() {
 	if (webgame.use_3d) {
 		window.camera.look_at = camera_base;
 		window.camera.up_vector = [0, 0, 1];
-		camera_base.location = [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 0];
+		camera_base.location = [(webgame.viewport[0] + webgame.viewport[2]) / 2, (webgame.viewport[1] + webgame.viewport[3]) / 2, 0];
 		// Set initial distance to match requested viewport.
-		var rx = (viewport[2] - viewport[0]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
-		var ry = (viewport[3] - viewport[1]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
+		var rx = (webgame.viewport[2] - webgame.viewport[0]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
+		var ry = (webgame.viewport[3] - webgame.viewport[1]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
 		please.make_animatable(window, 'r', rx > ry ? rx : ry);
 		please.make_animatable(window, 'theta', -90);
 		please.make_animatable(window, 'phi', 30);
@@ -383,7 +381,7 @@ _webgame.update_camera = function() {
 				camera_base.location_z + r * Math.sin(please.radians(phi))]; };
 	}
 	else {
-		window.camera.location = function() { return [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 100]; };
+		window.camera.location = function() { return [(webgame.viewport[0] + webgame.viewport[2]) / 2, (webgame.viewport[1] + webgame.viewport[3]) / 2, 100]; };
 	}
 	window.camera.update_camera();
 }
@@ -511,18 +509,18 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		window.camera_base = new please.GraphNode();
 		graph.add(camera_base);
 		_webgame.update_camera();
-		if (mouse_navigation) {
-			window._move_event = [null, null];
+		if (webgame.mouse_navigation) {
+			_webgame.move_event = [null, null];
 			window.AddEvent('mousedown', function(event) {
 				if (event.buttons != 4)
 					return;
-				_move_event = [event.clientX, event.clientY];
+				_webgame.move_event = [event.clientX, event.clientY];
 			});
 			window.AddEvent('mousemove', function(event) {
 				if (event.buttons != 4)
 					return;
-				var diff = [event.clientX - _move_event[0], event.clientY - _move_event[1]];
-				_move_event = [event.clientX, event.clientY];
+				var diff = [event.clientX - _webgame.move_event[0], event.clientY - _webgame.move_event[1]];
+				_webgame.move_event = [event.clientX, event.clientY];
 				var clamp = function(min, val, max, wrap) {
 					if (val > max) {
 						if (wrap) {
@@ -564,6 +562,44 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	else {
 		window.camera.look_at = function() { return [window.camera.location_x, window.camera.location_y, 0]; };
 		_webgame.update_camera();
+		if (webgame.mouse_navigation) {
+			_webgame.move_event = [null, null];
+			window.AddEvent('mousedown', function(event) {
+				if (event.buttons != 4)
+					return;
+				_webgame.move_event = [event.clientX, event.clientY];
+			});
+			window.AddEvent('mousemove', function(event) {
+				if (event.buttons != 4)
+					return;
+				var diff = [event.clientX - _webgame.move_event[0], event.clientY - _webgame.move_event[1]];
+				_webgame.move_event = [event.clientX, event.clientY];
+				var view = webgame.viewport;
+				var factor = camera.orthographic_grid;
+				view[0] -= diff[0] / factor;
+				view[1] += diff[1] / factor;
+				view[2] -= diff[0] / factor;
+				view[3] += diff[1] / factor;
+				webgame.viewport = view;
+			});
+			var scroll = function(event) {
+				var view = webgame.viewport;
+				var pos = pos_from_event(event);
+				for (var i = 0; i < 2; ++i) {
+					view[2 * i] -= pos[0];
+					view[2 * i + 1] -= pos[1];
+				}
+				for (var i = 0; i < view.length; ++i)
+					view[i] *= 1 + event.detail / (event.shiftKey ? 100 : 10);
+				for (var i = 0; i < 2; ++i) {
+					view[2 * i] += pos[0];
+					view[2 * i + 1] += pos[1];
+				}
+				webgame.viewport = view;
+			};
+			window.AddEvent('mousewheel', scroll);
+			window.AddEvent('DOMMouseScroll', scroll);
+		}
 	}
 	window.camera.activate();
 
@@ -762,7 +798,7 @@ _webgame.resize_window = function(force) { // {{{
 	var size = [_webgame.mainscreen.clientWidth, _webgame.mainscreen.clientHeight];
 	if (size[0] == 0 || size[1] == 0)
 		return;
-	if (force === true || _webgame.canvas.width != size[0] || _webgame.canvas.height != size[1]) {
+	if (force || _webgame.canvas.width != size[0] || _webgame.canvas.height != size[1]) {
 		if (webgame.use_3d) {
 			var max = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
 			if (size[0] > max) {
@@ -779,8 +815,8 @@ _webgame.resize_window = function(force) { // {{{
 		if (webgame.use_3d)
 			gl.viewport(0, 0, size[0], size[1]);
 		else {
-			var vw = viewport[2] - viewport[0];
-			var vh = viewport[3] - viewport[1];
+			var vw = webgame.viewport[2] - webgame.viewport[0];
+			var vh = webgame.viewport[3] - webgame.viewport[1];
 			var other_w = size[1] * vw / vh;
 			if (size[0] > other_w)
 				please.dom.orthographic_grid = size[1] / vh;
@@ -792,6 +828,11 @@ _webgame.resize_window = function(force) { // {{{
 		}
 	}
 	please.__align_canvas_overlay();
+	if (force) {
+		// __align_canvas_overlay may not have done anything, so trigger the event just in case.
+		var event = new CustomEvent("mgrl_overlay_aligned");
+		window.dispatchEvent(event);
+	}
 }; // }}}
 
 window.AddEvent('mgrl_overlay_aligned', function() { // {{{
