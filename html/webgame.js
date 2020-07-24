@@ -345,7 +345,7 @@ function show_chat(source, message) { // {{{
 
 // Internal variables and functions. {{{
 // Global variables for internal use are all inside one object to prevent namespace pollution.
-var _webgame = { playerrows: [], watchlist: [], canvas_list: [], div_list: [], translations: {}, chat: show_chat, ui: {}, removing: [], prepare_update: [], argorder: [], viewport: [-20, -15, 20, 15] };
+var _webgame = { playerrows: [], viewerrows: [], watchlist: [], canvas_list: [], div_list: [], translations: {}, chat: show_chat, ui: {}, removing: [], prepare_update: [], argorder: [], viewport: [-20, -15, 20, 15] };
 webgame.args = {};
 if (document.location.search[0] == '?') {
 	var s = document.location.search.substring(1).split('&');
@@ -689,8 +689,8 @@ _webgame.id = function(name, num) { // {{{
 	_webgame.update_url();
 }; // }}}
 
-_webgame.init = function(languages) { // {{{
-	// Set up language select.
+_webgame.init = function(languages, settings) { // {{{
+	// Set up language select. {{{
 	var have_languages = [];
 	for (var language in _webgame.translations)
 		have_languages.push(language);
@@ -730,7 +730,6 @@ _webgame.init = function(languages) { // {{{
 		}
 	}
 	_webgame.set_language(_webgame.languages[0]);
-	document.getElementById('title_game_name').value = _("$1's game")(my_name);
 	document.getElementById('playername').value = my_name;
 	_webgame.gametitle = document.title;
 	_webgame.titlescreen = document.getElementById('title');
@@ -745,11 +744,77 @@ _webgame.init = function(languages) { // {{{
 	_webgame.claim = document.getElementById('claim');
 	_webgame.release = document.getElementById('release');
 	_webgame.players = document.getElementById('players');
+	_webgame.viewersdiv = document.getElementById('viewersdiv');
+	_webgame.viewers = document.getElementById('viewers');
 	_webgame.vdiv = document.getElementById('vdiv');
 	_webgame.handle = document.getElementById('handle');
 	_webgame.chatter = document.getElementById('chatter');
 	_webgame.handle.AddEvent('mousedown', _webgame.resize_chat);
 	_webgame.game.AddClass('hidden');
+	// }}}
+	// Set up settings table. {{{
+	var table = document.getElementById('settings');
+	_webgame.new_settings = {};
+	var radiocount = 0;
+	for (var s = 0; s < settings.length; ++s) {
+		var setting = settings[s];
+		var tr = table.AddElement('tr');
+		var name = tr.AddElement('td');
+		var value = tr.AddElement('td');
+		name.AddText(setting.name);
+		var key = (setting.key === undefined ? setting.name : setting.key);
+		console.assert(_webgame.new_settings[key] === undefined);
+		if (setting.desc !== undefined)
+			name.title = setting.desc;
+		if (setting.type == 'number') {
+			var input = value.AddElement('input');
+			input.type = 'number';
+			input.value = (setting['default'] === undefined ? 0 : setting['default']);
+			input.key = key;
+			_webgame.new_settings[key] = Number(input.value);
+			input.AddEvent('change', function() { _webgame.new_settings[this.key] = Number(this.value); });
+		}
+		else if (setting.type == 'string') {
+			var input = value.AddElement('input');
+			input.type = 'text';
+			input.value = (setting['default'] === undefined ? key == 'name' ? _("$1's game")(my_name) : '' : setting['default']);
+			input.key = key;
+			_webgame.new_settings[key] = input.value;
+			input.AddEvent('change', function() { _webgame.new_settings[this.key] = this.value; });
+		}
+		else if (setting.type == 'select') {
+			_webgame.new_settings[key] = 0;
+			var select = value.AddElement('select');
+			for (var o = 0; o < setting.options.length; ++o) {
+				var option = setting.options[o];
+				select.AddElement('option').AddText(option);
+			}
+			select.key = key;
+			select.AddEvent('change', function() { _webgame.new_settings[this.key] = this.selectedIndex; });
+		}
+		else if (setting.type == 'radio') {
+			radiocount += 1;
+			_webgame.new_settings[key] = 0;
+			for (var o = 0; o < setting.options.length; ++o) {
+				var option = setting.options[o];
+				if (o > 0)
+					value.AddElement('br');
+				var label = value.AddElement('label');
+				var radio = label.AddElement('input');
+				radio.type = 'radio';
+				radio.name = 'webgameradio' + radiocount;
+				label.AddText(option);
+				radio.key = key;
+				radio.retval = option;
+				radio.AddEvent('click', function() { _webgame.new_settings[this.key] = this.retval; });
+				if (setting['default'] == option || o == 0)
+					radio.checked = true;
+			}
+		}
+		else if (setting.type == 'multiple') {
+		}
+	}
+	// }}}
 }; // }}}
 
 _webgame.end = function(result) { // {{{
@@ -910,9 +975,7 @@ _webgame.title_view = function() { // {{{
 }; // }}}
 
 _webgame.title_new = function() { // {{{
-	var gamename = document.getElementById('title_game_name').value;
-	var num_players = Number(document.getElementById('title_num_players').value);
-	game('new', gamename, num_players);
+	game('new', _webgame.new_settings);
 }; // }}}
 
 // Shared object handling.
@@ -946,21 +1009,6 @@ _webgame.finish = function(name, args) { // {{{
 			}
 			_webgame.ui = {};
 			window.end_game();
-		}
-		// Set number of players for new games.
-		if (Public.min_players == Public.max_players) {
-			document.getElementById('numplayers').AddClass('hidden');
-			document.getElementById('title_num_players').value = Public.max_players;
-		}
-		else {
-			document.getElementById('numplayers').RemoveClass('hidden');
-			var range = document.getElementById('range');
-			if (Public.max_players === null)
-				range.ClearAll().AddText('(' + Public.min_players + ' or more)');	// TODO: Make translatable.
-			else
-				range.ClearAll().AddText('(' + Public.min_players + ' - ' + Public.max_players + ')');
-			if (range.value == '')
-				range.value = Public.min_players;
 		}
 		// Show title screen.
 		var games = [];
@@ -1024,6 +1072,7 @@ _webgame.finish = function(name, args) { // {{{
 		please.renderer.overlay.RemoveClass('hidden');
 		_webgame.game.RemoveClass('hidden');
 		document.title = _webgame.gametitle + ' - ' + Public.name;
+		document.getElementById('gamename').ClearAll().AddText(Public.name);
 		if (window.camera !== undefined)
 			_webgame.resize_window();
 		if (window.update_canvas !== undefined && !webgame.use_3d)
@@ -1038,7 +1087,10 @@ _webgame.finish = function(name, args) { // {{{
 	if (Public.owner === null) {
 		_webgame.owner.AddClass('hidden');
 		_webgame.noowner.RemoveClass('hidden');
-		_webgame.claim.RemoveClass('hidden');
+		if (my_num !== null)
+			_webgame.claim.RemoveClass('hidden');
+		else
+			_webgame.claim.AddClass('hidden');
 		_webgame.release.AddClass('hidden');
 	}
 	else {
@@ -1060,16 +1112,16 @@ _webgame.finish = function(name, args) { // {{{
 		icon.style.background = playercolor(num);
 		var name = tr.AddElement('td');
 		var kick = tr.AddElement('td', 'kick');
-		var button = kick.AddElement('button').AddText(_('Kick'));
-		button.type = 'button';
-		button.num = num;
-		button.AddEvent('click', function() { game('webgame', 'kick', this.num); });
+		var kickbutton = kick.AddElement('button').AddText(_('Kick'));
+		kickbutton.type = 'button';
+		kickbutton.num = num;
+		kickbutton.AddEvent('click', function() { game('webgame', 'kick', Public.players[this.num].name); });
 		var swap = tr.AddElement('td', 'swap');
-		var button = swap.AddElement('button').AddText(_('Swap'));
-		button.type = 'button';
-		button.num = num;
-		button.AddEvent('click', function() { game('webgame', 'swap', this.num); });
-		_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kick, swap: swap});
+		var swapbutton = swap.AddElement('button').AddText(_('Swap'));
+		swapbutton.type = 'button';
+		swapbutton.num = num;
+		swapbutton.AddEvent('click', function() { game('webgame', 'swap', this.num); });
+		_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kickbutton, swap: swapbutton});
 	}
 	for (var i = 0; i < _webgame.playerrows.length; ++i) {
 		var p = _webgame.playerrows[i];
@@ -1086,6 +1138,38 @@ _webgame.finish = function(name, args) { // {{{
 			p.swap.RemoveClass('hidden');
 		else
 			p.swap.AddClass('hidden');
+	}
+	// Update viewers list.
+	if (Public.viewers.length == 0)
+		_webgame.viewersdiv.AddClass('hidden');
+	else
+		_webgame.viewersdiv.RemoveClass('hidden');
+	while (_webgame.viewerrows.length > Public.viewers.length)
+		_webgame.viewers.removeChild(_webgame.viewerrows.pop().tr);
+	while (_webgame.viewerrows.length < Public.viewers.length) {
+		var num = _webgame.viewerrows.length;
+		var tr = _webgame.viewers.AddElement('tr');
+		var icon = tr.AddElement('td').AddElement('div', 'icon');
+		icon.style.background = 'black';
+		var name = tr.AddElement('td');
+		var kick = tr.AddElement('td', 'kick');
+		var kickbutton = kick.AddElement('button').AddText(_('Kick'));
+		kickbutton.type = 'button';
+		kickbutton.num = num;
+		kickbutton.AddEvent('click', function() { game('webgame', 'kick', Public.viewers[this.num].name); });
+		_webgame.viewerrows.push({tr: tr, nametext: undefined, name: name, kick: kickbutton});
+	}
+	for (var i = 0; i < _webgame.viewerrows.length; ++i) {
+		var p = _webgame.viewerrows[i];
+		var name = Public.viewers[i].name;
+		if (p.nametext !== name) {
+			p.name.ClearAll().AddText(name);
+			p.nametext = name;
+		}
+		if (my_num !== null && Public.owner == my_num)
+			p.kick.RemoveClass('hidden');
+		else
+			p.kick.AddClass('hidden');
 	}
 	// Check watch events.
 	// Fire them in a separate loop, to avoid unexpected behavior when the watch list is changed from a callback.

@@ -31,7 +31,7 @@
 			</p>
 			<div id='game'>
 				<hr/>
-				<h3 class='translate'>Game</h3>
+				<h3 id='gamename'></h3>
 				<p>
 					Owner: <span id='owner'></span>
 					<span id='noowner' class='translate'>None</span>
@@ -41,13 +41,17 @@
 				<button id='leave' type='button' onclick='game("webgame", "leave")' class='translate'>Leave</button>
 				<h4 class='translate'>Players</h4>
 				<table id='players'></table>
+				<div id='viewersdiv'>
+					<h4 class='translate'>Viewers</h4>
+					<table id='viewers'></table>
+				</div>
 			</div>
 		</div>
 		<div id='vdiv'>
 			<div id='main'>
 				<div id='title'>
 					<h1 id='game_title' class="translate"></h1>
-					<div id='titleselection'>
+					<div id='titleselection' class='frame'>
 						<h2 class='translate'>Running Games</h2>
 						<p>
 							<select id='title_games'></select>
@@ -56,16 +60,14 @@
 							<span id='title_status'></span>
 						</p>
 					</div>
-					<h2 class='translate'>Create New Game</h2>
-					<p>
-						<button type='button' onclick="_webgame.title_new()" class='translate'>Create New Game</button>
-						<span class='translate'>Name of the new game:</span>
-						<input type='text' id='title_game_name'/>
-						<span id='numplayers'>
-							<span class='translate'>Number of players:</span>
-							<input type='text' name='num_players' id='title_num_players'/><span id='range'></span>
-						</span>
-					</p>
+					<div class='frame'>
+						<h2 class='translate'>Create New Game</h2>
+						<p>
+							<table id='settings'>
+							</table>
+							<button type='button' onclick="_webgame.title_new()" class='translate'>Create New Game</button>
+						</p>
+					</div>
 				</div>
 				<div id='notitle' class='hidden'>
 					<canvas id='canvas' width='1200' height='600'></canvas>

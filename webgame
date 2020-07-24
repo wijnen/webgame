@@ -381,6 +381,9 @@ cmds = {}
 # Number of players; this is created from game.num_players.
 _num_players = None
 
+# Game settings; this is created from game.settings.
+_settings = None
+
 # Mark translations.
 _ = lambda x: x
 game._ = _
@@ -442,7 +445,7 @@ class Instance: # Class for game instances. {{{
 	This class handles a running game.
 	It contains one object of the game.Game class, which is defined in the game file.
 	'''
-	def __init__(self, cls, name, num_players = None, *args):
+	def __init__(self, cls, settings, *args):
 		'''Set up the instance.
 		Initialize the Game object.
 		Add players.
@@ -455,12 +458,17 @@ class Instance: # Class for game instances. {{{
 		self.game.launch = self.launch
 		self.game.stop_all_tasks = self.stop_all_tasks
 		self.game.pause = self.pause
+		assert isinstance(settings, dict)
+		assert all(isinstance(x, str) for x in settings)
+		assert 'name' in settings
+		name = settings['name']
 		n = name
 		i = 0
 		while name in instances:
 			name = '{0} ({1})'.format(n, i)
 			i += 1
 		instances[name] = self
+		self.game.settings = settings
 		self.game.broadcast = server.broadcast[name]
 		self.game.add_player = lambda: self.add_player(False)
 		self.game.remove_player = self.remove_player
@@ -474,14 +482,11 @@ class Instance: # Class for game instances. {{{
 		self.game.Public._live()
 		self.game.Public.name = name
 		self.game.Public.players = []
+		self.game.Public.viewers = []
 		# Set up players.
 		if name != '':
-			if not isinstance(num_players, int):
-				num_players = _num_players[0]
-			if num_players < _num_players[0]:
-				num_players = _num_players[0]
-			if _num_players[1] is not None and num_players > _num_players[1]:
-				num_players = _num_players[1]
+			# Figure out number of players.
+			num_players = _num_players(settings)
 			title_game.game.Public.games[name] = [None] * num_players
 		else:
 			num_players = 0
@@ -678,8 +683,7 @@ class Instance: # Class for game instances. {{{
 		This function can be called from the Game class, but then force is set to False and cannot be passed.
 		Adding players is allowed or forbidden by the game. Force is used to add initial players.
 		'''
-		assert _num_players[1] is None or len(self.game.players) < _num_players[1]
-		assert force or _num_players[2]
+		# FIXME: adding players while the game is running is broken.
 		p = Player()
 		p.connection = None
 		p.Private = Shared_Object(['Private'], p, self.game.Public.name)
@@ -697,6 +701,7 @@ class Instance: # Class for game instances. {{{
 		'''Remove a player from the game.
 		This function is never called by the system. It can only be called from the Game class.
 		'''
+		# FIXME: removing players while the game is running is broken.
 		assert len(self.game.players) > _num_players[0]
 		assert p < len(self.game.players)
 		if hasattr(self.game, 'player_removed'):
@@ -825,22 +830,13 @@ class Connection: # {{{
 				languages.remove(language)
 			languages.insert(0, socket.data['query']['language'])
 		self._socket.webgame.event('id', self._name, None)
-		self._socket.webgame.event('init', languages)
+		self._socket.webgame.event('init', languages, _settings)
 		broadcast_shared(self, ['Public'], self._instance.game.Public)
 		broadcast_shared(self, ['Private'], None, title_game.game.Public.name)
 	def _closed(self):
 		'''This is called by the server when the connection has closed.'''
-		if self._num is not None:
-			self._instance.game.players[self._num].connection = None
-			self._instance.game.Public.players[self._num].name = None
-			if self._instance.game.Public.owner == self._num:
-				self._instance.game.Public.owner = None
-			if game.autokill and all(p.connection is None for p in self._instance.game.players):
-				# Last player left; destroy game.
-				self._instance.close()
-			else:
-				self._instance.update_stats()
-			self._num = None
+		if self._instance is not title_game:
+			admin({'connection': self, 'args': ['leave']})
 		del connections[self._name]
 	def __getattr__(self, attr):
 		'''This defines which commands can be called by the clients.
@@ -915,8 +911,6 @@ class Title: # Class for default title game object. {{{
 		'''
 		self.Public.title = game.name
 		self.Public.games = {}
-		self.Public.min_players = _num_players[0]
-		self.Public.max_players = _num_players[1]
 		while True:
 			cmd = (yield ('new', 'join', 'return', 'view'))
 			connection = cmd['connection']
@@ -973,12 +967,15 @@ class Title: # Class for default title game object. {{{
 				instance.update_stats()
 				broadcast_shared(connection, ['Private'], connection._instance.game.players[connection._num].Private)
 				broadcast_shared(connection, ['Public'], connection._instance.game.Public)
+				instance.update_stats()
 			elif command == 'view':
 				connection._instance = instance
 				connection._socket.groups.remove(self.Public.name)
 				connection._socket.groups.add(cmd['args'][0])
+				instance.game.Public.viewers.append({'name': connection._name})
 				broadcast_shared(connection, ['Public'], connection._instance.game.Public)
 				broadcast_shared(connection, ['Private'], None)
+				instance.update_stats()
 			else:
 				connection._instance.game.reply(_('Impossible command'))
 				continue
@@ -1012,6 +1009,9 @@ def admin(args): # {{{
 				end = connection._instance
 			else:
 				connection._instance.update_stats()
+		else:
+			idx = [x for x, v in enumerate(connection._instance.game.Public.viewers) if v['name'] == connection._name][0]
+			connection._instance.game.Public.viewers.pop(idx)
 		connection._socket.groups.remove(connection._instance.game.Public.name)
 		connection._instance = title_game
 		connection._socket.groups.add(title_game.game.Public.name)
@@ -1029,19 +1029,22 @@ def admin(args): # {{{
 		connection._instance.game.Public.owner = connection._num
 	elif cmd[0] == 'release':
 		if connection._num is None:
-			return _('cannot release ownership without being in a game')
+			return _('Cannot release ownership without being in a game')
 		if connection._instance.game.Public.owner != connection._num:
 			return _('Cannot release without ownership')
 		connection._instance.game.Public.owner = None
 	elif cmd[0] == 'kick':
+		if not isinstance(cmd[1], str):
+			return _('Kick requires a string argument')
 		if connection._num is None:
-			return _('cannot kick players without being in a game')
+			return _('Cannot kick players without being in a game')
 		if connection._instance.game.Public.owner != connection._num:
 			return _('Cannot kick without ownership')
-		the_game = connection._instance.game
-		if not isinstance(cmd[1], int) or not 0 <= cmd[1] < len(the_game.players) or cmd[1] == connection._num or the_game.players[cmd[1]].connection is None:
-			return _('Cannot kick this player')
-		return admin({'connection': the_game.players[cmd[1]].connection, 'args': ['leave']})
+		if cmd[1] == connection._name:
+			return _('Cannot kick yourself')
+		if cmd[1] not in connections or connections[cmd[1]]._instance != connection._instance:
+			return _('That player is not in this game')
+		return admin({'connection': connections[cmd[1]], 'args': ['leave']})
 	elif cmd[0] == 'chat':
 		connection._instance.game.broadcast.webgame('chat', connection._num if connection._num is not None else connection._name, cmd[1])
 	elif cmd[0] == 'swap':
@@ -1171,7 +1174,7 @@ def Game(): # Main function to start a game. {{{
 	This starts a title instance and sets up the server.
 	webgame-build automatically calls this function after the code in the game file is run.
 	'''
-	global server, title_game, _num_players
+	global server, title_game, _num_players, _settings
 	# Set up module path.
 	sys.path = [os.path.join(os.curdir, 'modules')] + sys.path
 	# Set up the game name.
@@ -1186,17 +1189,33 @@ def Game(): # Main function to start a game. {{{
 	# Set up other constants.
 	if not hasattr(game, 'autokill'):
 		game.autokill = True
-	# Fill in min and max if not specified.
+	# Set up number of players.
 	assert hasattr(game, 'num_players')
+	def read_num_players(settings, min_players, max_players):
+		assert 'num_players' in settings
+		return min(max(settings['num_players'], min_players, max_players))
 	if isinstance(game.num_players, int):
-		_num_players = (game.num_players, game.num_players, False)
-	elif len(game.num_players) == 3:
-		_num_players = (game.num_players[0], game.num_players[1], game.num_players[2])
-	elif isinstance(game.num_players, tuple):
-		_num_players = (game.num_players[0], game.num_players[1], False)
+		_num_players = lambda x: game.num_players
+	elif isinstance(game.num_players, (tuple, list)):
+		_num_players = lambda x: x['num_players'] if x['num_players'] in game.num_players else game.num_players[0]
 	else:
-		_num_players = (game.num_players[0], game.num_players[1], True)
-	assert 1 <= _num_players[0] and (_num_players[1] is None or _num_players[0] <= _num_players[1])
+		_num_players = game.num_players
+	# Set up settings.
+	if not hasattr(game, 'settings'):
+		_settings = []
+	else:
+		_settings = game.settings[:]
+	if not any(s['key'] == 'name' for s in _settings):
+		_settings.insert(0, {'key': 'name', 'type': 'string', 'name': _('Game Name')})
+	if isinstance(game.num_players, (tuple, list)) and not any(s['key'] == 'num_players' for s in _settings):
+		if _settings[0]['key'] == 'name':
+			p = 1
+		else:
+			p = 0
+		if len(game.num_players) <= 5:
+			_settings.insert(p, {'key': 'num_players', 'type': 'radio', 'options': game.num_players, 'name': _('Number of Players')})
+		else:
+			_settings.insert(p, {'key': 'num_players', 'type': 'select', 'options': game.num_players, 'name': _('Number of Players')})
 	# Set up commands.
 	cmds['webgame'] = {None: (admin, None)}
 	if hasattr(game, 'commands'):
@@ -1226,9 +1245,9 @@ def Game(): # Main function to start a game. {{{
 	server.handle_ext('glsl', 'text/plain')
 	# Set up title page.
 	if hasattr(game, 'Title'):
-		title_game = Instance(game.Title, '')
+		title_game = Instance(game.Title, {'name': ''})
 	else:
-		title_game = Instance(Title, '')
+		title_game = Instance(Title, {'name': ''})
 	# Add the admin to the title game.
 	adminjoin()
 	log('Game "{0}" started, listening on port {1}'.format(game.name, config['port']))

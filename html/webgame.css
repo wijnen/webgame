@@ -6,6 +6,14 @@
 	display: none;
 }
 
+.frame {
+	border: solid black 1px;
+	border-radius: 1ex;
+	margin: 2em;
+	padding: 0ex 2ex 0ex 2ex;
+	background: #fdd;
+}
+
 body.demo > div#vdiv > div#chat > button#next {
 	display: block;
 	z-index: 1;
