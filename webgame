@@ -1049,17 +1049,17 @@ def admin(args): # {{{
 			return _('Watchers cannot swap with players')
 		the_game = connection._instance.game
 		num = len(the_game.players)
-		srcnum = connection._num if len(cmd) < 2 or not isinstance(cmd[1], int) or not 0 <= cmd[1] < num else cmd[1]
-		if len(cmd) < 3 or not isinstance(cmd[2], int) or not 0 <= cmd[2] < num:
+		if len(cmd) < 2 or not isinstance(cmd[1], int) or not 0 <= cmd[1] < num:
 			for i in range(1, num):
-				p = (srcnum + i) % num
+				p = (connection._num + i) % num
 				if the_game.players[p].connection is None:
 					dstnum = p
 					break
 			else:
 				return _('There is no disconnected player to swap with')
 		else:
-			dstnum = cmd[2]
+			dstnum = cmd[1]
+		srcnum = connection._num if len(cmd) < 3 or not isinstance(cmd[2], int) or not 0 <= cmd[2] < num else cmd[2]
 		src = the_game.players[srcnum]
 		dst = the_game.players[dstnum]
 		if (dst.connection is not None or srcnum != connection._num) and the_game.Public.owner != connection._num:

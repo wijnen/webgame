@@ -4,8 +4,16 @@
 // Functions and variables which can be replaced by user code. {{{
 
 var mouse_navigation = true;
-var viewport = [-20, -15, 20, 15];	// Initial camera viewport.
 var show_players = false;	// If true, show the player list at bottom.
+
+Object.defineProperty(window, "viewport", {
+	enumerable: true,
+	get: function() { return _webgame.viewport; },
+	set: function(value) {
+		_webgame.viewport = value;
+		_webgame.update_camera();
+	}
+});
 
 function playercolor(num) { // {{{
 	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
@@ -44,9 +52,10 @@ var my_name = null;	// Player name, as returned by the server.
 var my_num = null;	// Player number of me, or null if not playing.
 // Lesser used options are in the "webgame" object, to prevent namespace pollution.
 var webgame = {
-	use_3d: true,	// If true, the interface is 3d. Otherwise, it is 2d.
-	title_gamelist: [],	// Games which are available in the title screen.
-	title_select: undefined	// Select element on title screen (for changing style).
+	use_3d: true,			// If true, the interface is 3d. Otherwise, it is 2d.
+	title_gamelist: [],		// Games which are available in the title screen.
+	title_select: undefined,	// Select element on title screen (for changing style).
+	args: undefined			// Object containing search string as key-value pairs. A null value means there was no argument.
 };
 
 function game(target) { // {{{
@@ -338,7 +347,46 @@ function show_chat(source, message) { // {{{
 
 // Internal variables and functions. {{{
 // Global variables for internal use are all inside one object to prevent namespace pollution.
-var _webgame = { playerrows: [], watchlist: [], canvas_list: [], div_list: [], translations: {}, chat: show_chat, ui: {}, removing: [], prepare_update: [] };
+var _webgame = { playerrows: [], watchlist: [], canvas_list: [], div_list: [], translations: {}, chat: show_chat, ui: {}, removing: [], prepare_update: [], argorder: [], viewport: [-20, -15, 20, 15] };
+webgame.args = {};
+if (document.location.search[0] == '?') {
+	var s = document.location.search.substring(1).split('&');
+	for (var i = 0; i < s.length; ++i) {
+		var kv = s[i].split('=', 2);
+		if (kv.length == 0)
+			continue;
+		var key = decodeURIComponent(kv[0]);
+		var value = (kv.length == 2 ? decodeURIComponent(kv[1]) : null);
+		if (webgame.args[key] !== undefined)
+			continue
+		webgame.args[key] = value;
+		_webgame.argorder.push(key);
+	}
+}
+
+_webgame.update_camera = function() {
+	if (window.camera === undefined)
+		return;
+	if (webgame.use_3d) {
+		window.camera.look_at = camera_base;
+		window.camera.up_vector = [0, 0, 1];
+		camera_base.location = [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 0];
+		// Set initial distance to match requested viewport.
+		var rx = (viewport[2] - viewport[0]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
+		var ry = (viewport[3] - viewport[1]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
+		please.make_animatable(window, 'r', rx > ry ? rx : ry);
+		please.make_animatable(window, 'theta', -90);
+		please.make_animatable(window, 'phi', 30);
+		window.camera.location = function() {
+			return [camera_base.location_x + r * Math.cos(please.radians(theta)) * Math.cos(please.radians(phi)),
+				camera_base.location_y + r * Math.sin(please.radians(theta)) * Math.cos(please.radians(phi)),
+				camera_base.location_z + r * Math.sin(please.radians(phi))]; };
+	}
+	else {
+		window.camera.location = function() { return [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 100]; };
+	}
+	window.camera.update_camera();
+}
 
 // System initialization.
 window.AddEvent('load', function() { // {{{
@@ -393,16 +441,9 @@ window.AddEvent('load', function() { // {{{
 			if (loading > 0)
 				return;
 			if (webgame.use_3d) {
-				if (document.location.search[0] == '?') {
-					var s = document.location.search.substring(1).split('&');
-					for (var i = 0; i < s.length; ++i) {
-						var kv = s[i].split('=', 2);
-						if (kv[0] == '2d' && kv[1] != '0') {
-							webgame.use_3d = false;
-							_webgame.force_2d = true;
-							break;
-						}
-					}
+				if (webgame.args.interface == '2d') {
+					webgame.use_3d = false;
+					_webgame.force_2d = true;
 				}
 			}
 			if (webgame.use_3d)
@@ -469,19 +510,7 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		renderer.graph = graph;
 		window.camera_base = new please.GraphNode();
 		graph.add(camera_base);
-		window.camera.look_at = camera_base;
-		window.camera.up_vector = [0, 0, 1];
-		camera_base.location = [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 0];
-		// Set initial distance to match requested viewport.
-		var rx = (viewport[2] - viewport[0]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
-		var ry = (viewport[3] - viewport[1]) / 2 / Math.tan(please.radians(window.camera.fov) / 2);
-		please.make_animatable(window, 'r', rx > ry ? rx : ry);
-		please.make_animatable(window, 'theta', -90);
-		please.make_animatable(window, 'phi', 30);
-		window.camera.location = function() {
-			return [camera_base.location_x + r * Math.cos(please.radians(theta)) * Math.cos(please.radians(phi)),
-				camera_base.location_y + r * Math.sin(please.radians(theta)) * Math.cos(please.radians(phi)),
-				camera_base.location_z + r * Math.sin(please.radians(phi))]; };
+		_webgame.update_camera();
 		if (mouse_navigation) {
 			window._move_event = [null, null];
 			window.AddEvent('mousedown', function(event) {
@@ -534,10 +563,9 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	} // }}}
 	else {
 		window.camera.look_at = function() { return [window.camera.location_x, window.camera.location_y, 0]; };
-		window.camera.location = function() { return [(viewport[0] + viewport[2]) / 2, (viewport[1] + viewport[3]) / 2, 100]; };
+		_webgame.update_camera();
 	}
 	window.camera.activate();
-	window.camera.update_camera();
 
 	// Finish setting up audio system.
 	for (var a in _webgame.audio) {
@@ -730,11 +758,11 @@ _webgame.resize_chat = function(event) { // {{{
 	}
 }; // }}}
 
-_webgame.resize_window = function() { // {{{
+_webgame.resize_window = function(force) { // {{{
 	var size = [_webgame.mainscreen.clientWidth, _webgame.mainscreen.clientHeight];
 	if (size[0] == 0 || size[1] == 0)
 		return;
-	if (_webgame.canvas.width != size[0] || _webgame.canvas.height != size[1]) {
+	if (force === true || _webgame.canvas.width != size[0] || _webgame.canvas.height != size[1]) {
 		if (webgame.use_3d) {
 			var max = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
 			if (size[0] > max) {
@@ -1533,17 +1561,34 @@ _webgame.Private_update = function(path, value) { // {{{
 _webgame.update_url = function() { // {{{
 	if (my_name === undefined)
 		return;
+	var state = document.location.protocol + '//' + document.location.host + document.location.pathname;
+	var sep = '?';
 	var lang;
-	if (_webgame.language === undefined)
-		lang = '';
-	else
-		lang = '&lang=' + encodeURIComponent(_webgame.language);
-	var force_2d;
-	if (_webgame.force_2d)
-		force_2d = '&2d=1';
-	else
-		force_2d = '';
-	history.replaceState(null, document.title, document.location.protocol + '//' + document.location.host + document.location.pathname + '?name=' + encodeURIComponent(my_name) + lang + force_2d);
+	var set = function(arg, value) {
+		if (value === undefined) {
+			if (webgame.args[arg] !== undefined) {
+				delete webgame.args[arg];
+				_webgame.argorder.splice(_webgame.argorder.indexOf(arg), 1);
+			}
+		}
+		else {
+			if (webgame.args[arg] === undefined)
+				_webgame.argorder.push(arg);
+			webgame.args[arg] = value;
+		}
+	};
+	set('name', my_name);
+	set('lang', _webgame.language);
+	set('interface', _webgame.force_2d ? '2d' : undefined);
+	for (var i = 0; i < _webgame.argorder.length; ++i) {
+		var arg = _webgame.argorder[i];
+		if (webgame.args[arg] === null)
+			state += sep + encodeURIComponent(arg);
+		else
+			state += sep + encodeURIComponent(arg) + '=' + encodeURIComponent(webgame.args[arg]);
+		sep = '&';
+	}
+	history.replaceState(null, document.title, state);
 }; // }}}
 // }}}
 
