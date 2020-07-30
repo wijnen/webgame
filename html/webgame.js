@@ -860,6 +860,8 @@ _webgame.resize_chat = function(event) { // {{{
 }; // }}}
 
 _webgame.resize_window = function(force) { // {{{
+	if (_webgame.mainscreen === undefined)
+		return;
 	var size = [_webgame.mainscreen.clientWidth, _webgame.mainscreen.clientHeight];
 	if (size[0] == 0 || size[1] == 0)
 		return;
