@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset='utf-8'/>
+		<title>JavaScript for Python Programmers</title>
+<style type='text/css'>
+td { background: #cfc; }
+th { background: #fcc; }
+tr:first-child th { background: #ccf; }
+td, th {
+	border-radius: 2ex;
+	padding: 1ex;
+}
+</style>
+	</head>
+	<body>
+		<h1>JavaScript Cheat Sheet for Python Programmers</h1>
+
+		<table>
+			<tr>
+				<th>Feature</th>
+				<th>Python</th>
+				<th>JavaScript</th>
+				<th>Explanation</th>
+			</tr>
+			<tr>
+				<th>Command Terminators</th>
+				<td><pre>
+parrot = 'dead'
+				</pre></td>
+				<td><pre>
+parrot = 'dead';
+				</pre></td>
+				<td>Because JavaScript doesn't recognize line endings as command terminators, every command must be terminated by a semicolon.</td>
+			</tr>
+			<tr>
+				<th>Code Blocks</th>
+				<td><pre>
+if cheese == 'cheddar':
+	print('out of stock')
+	return
+while life_has_meaning():
+	pass
+				</pre></td>
+				<td><pre>
+if (cheese == 'cheddar') {
+	print('out of stock');
+	return;
+}
+while (life_has_meaning()) {}
+				</pre></td>
+				<td>
+					<p>Technically, JavaScript allows exactly one statement after an if, while, etc. Instead of a normal statement, it is possible to use a compound statement. This is a seried of statements enclosed in curly braces. The JavaScript interpreter makes no distinction between newline and space, so indentation is irrelevant. However, incorrect indentation makes for unmaintainable code, so this "feature" should never be used.</p>
+					<p> There is no <i>pass</i> statement in JavaScript; an empty compound statement should be used instead. Note that an empty regular statement (a semicolon) is also allowed. This is a common mistake and it should therefore never be done on purpose.</p>
+				</td>
+			</tr>
+			<tr>
+				<th>Special Constants</th>
+				<td><pre>
+None
+None
+				</pre></td>
+				<td><pre>
+null
+undefined
+				</pre></td>
+				<td>JavaScript has two values similar to Python's <i>None</i> value. <i>null</i> is a value that can be assigned and conventionally means that the value is absent, similar to how <i>None</i> is conventionally used. <i>undefined</i> can also be assigned, but is mostly the result of things that have not be assigned, such as the return value of a function that didn't provide one, or the value of an object member that isn't defined.</td>
+			</tr>
+			<tr>
+				<th>Operators</th>
+				<td><pre>
+found(item) and item == spoon
+found(item) or item == spoon
+not found(item)
+item is spoon
+item is not spoon
+10 ** 35
+				</pre></td>
+				<td><pre>
+found(item) &amp;&amp; item == spoon
+found(item) || item == spoon
+!found(item)
+item === spoon
+item !== spoon
+Math.pow(10, 35)
+				</pre></td>
+				<td>Other operators are identical.</td>
+			</tr>
+			<tr>
+				<th>Debugging Output</th>
+				<td><pre>
+print('Get on with it!')
+				</pre></td>
+				<td><pre>
+console.info('Get on with it!');
+				</pre></td>
+				<td>The output that is produced can be viewed in the debugging console (ctrl-shift-k in Firefox). If you use console.error instead, it'll include a stack backtrace.</td>
+			</tr>
+			<tr>
+				<th>Creating Variables</th>
+				<td><pre>
+name = 'Brian'
+age = 25
+				</pre></td>
+				<td><pre>
+var name = 'Brian';
+var age;
+age = 25;
+				</pre></td>
+				<td>In JavaScript, a variable must be defined before it can be used.</td>
+			</tr>
+			<tr>
+				<th>Conditional Expressions</th>
+				<td><pre>
+if name == 'Brian':
+	gender = 'Not a girl'
+while age &lt; 25:
+       age += 1
+				</pre></td>
+				<td><pre>
+if (name == 'Brian')
+	gender = 'Not a girl';
+while (age &lt; 25)
+	age += 1;
+				</pre></td>
+				<td>The conditional expression must be in parenthesis. It is not followed by a colon.</td>
+			</tr>
+			<tr>
+				<th>For Loops on Lists</th>
+				<td><pre>
+for i, cheese in enumerate(cheeses):
+	print(cheese)
+				</pre></td>
+				<td><pre>
+for (var i = 0; i &lt; cheeses.length; ++i) {
+	var cheese = cheeses[i];
+	console.info(cheese);
+}
+				</pre></td>
+				<td>It's best to treat this for statement as a magic line that just needs to be written this way. <i>var</i> may be omitted if <i>i</i> is defined previously.</td>
+			</tr>
+			<tr>
+				<th>For Loops on Objects</th>
+				<td><pre>
+for type in cheeses:
+	print(type, cheeses[type])
+				</pre></td>
+				<td><pre>
+for (var type in cheeses)
+	console.info(type, cheeses[type]);
+				</pre></td>
+				<td></td>
+			</tr>
+			<tr>
+				<th>Lists</th>
+				<td><pre>
+cheeses = ['cheddar', 'gouda', 'parmezan']
+print(cheeses[5])	// raises an exception.
+last = cheeses.pop()
+cheeses.append('mozarella')
+first = cheeses.pop(0)
+				</pre></td>
+				<td><pre>
+var cheeses = ['cheddar', 'gouda', 'parmezan'];
+cheeses.note = 'out of stock';
+console.info(cheeses[5]); // prints "undefined".
+var last = cheeses.pop();
+cheeses.push('mozarella');
+var first = cheeses.splice(0, 1)[0];
+				</pre></td>
+				<td>Lists in JavaScript are called arrays. They are also objects and can have non-numerical items. Tuples don't exist in JavaScript. Undefined items are returned as the special <i>undefined</i> object. Negative indices cannot be used in JavaScript. Push and pop can be used to manipulate the end of the list. Splice can be used to add or remove items from other position. Its first argument is the position to act. The second is the number of items to remove. Those are returned as an array. Any further arguments are placed in the list instead of the removed items (if any).</td>
+			</tr>
+			<tr>
+				<th>Lengths</th>
+				<td><pre>
+print(len(cheeses))
+cheeses[1:] = []
+				</pre></td>
+				<td><pre>
+console.info(cheeses.length);
+cheeses.length = 1;
+				</pre></td>
+				<td>The <i>length</i> attribute is implicitly defined for arrays. Arrays can be truncated or expanded by changing its value. They are also automatically expanded by assigning a value to an item larger than the current length.</td>
+			</tr>
+			<tr>
+				<th>Dicts</th>
+				<td><pre>
+person = { 'name': 'Brian', 'age': 25 }
+print(person['name'])
+print(person['age'])
+				</pre></td>
+				<td><pre>
+var person = { name: 'Brian', 'age': 25 }
+console.info(person['name']);
+console.info(person.age);
+				</pre></td>
+				<td>All object keys are forced to be strings in JavaScript. The quotes may be omitted when defining an object if the value is a valid identifier. Items can be referenced either using square brackets, or (if the member name is a valid identifier) as an attribute.</td>
+			</tr>
+			<tr>
+				<th>Function Definitions</th>
+				<td><pre>
+def have_argument():
+	return "no, it isn't"
+				</pre></td>
+				<td><pre>
+function have_argument() {
+	return "no, it isn't";
+}
+var have_argument = function() {
+	return "no, it isn't";
+};
+				</pre></td>
+				<td>
+					<p>A function is defined with the <i>function</i> keyword. The body is inclosed in curly braces. Note that it is not a compound statement: the braces cannot be omitted if there is only one statement.</p>
+					<p>The function keyword can only be used as a command at top level. Inside a function body or other statement, a function expression must be assigned to a variable instead. Note that there is a semicolon after the function expression.</p>
+				</td>
+			</tr>
+			<tr>
+				<th>Function Expressions</th>
+				<td><pre>
+def romans():
+	return 'Go Home!'
+paint(times = 100, text = romans)
+				</pre></td>
+				<td><pre>
+paint(100, function() {
+	return 'Go Home!';
+});
+				</pre></td>
+				<td>(Older) JavaScript does not have a short notation for lambda functions. However, it does have a syntax for writing regular functions as an expression. So while Python makes the lambda function more readable, JavaScript makes callback functions more usable by placing them in the function call instead of defining them before it. Note that the entire function expression is within the parenthesis of the function call. Function expression do not need to have a name.</td>
+			</tr>
+			<tr>
+				<th>Function Arguments</th>
+				<td><pre>
+def paint(times, text = 'Romans They Go The House'):
+	print(text)
+paint(100, 'Romans, Go Home!')
+paint(times = 100)
+paint(text = 'Romans, Go Home!', times = 100)
+def paint(*args):
+	print(args[0]);
+				</pre></td>
+				<td><pre>
+function paint(times, text) {
+	if (text === undefined)
+		text = 'Romans They Go The House';
+	console.info(text)
+}
+paint(100, 'Romans, Go Home!');
+paint(100);
+paint(100, 'Romans, Go Home!');
+function paint() {
+	console.info(arguments[0]);
+}
+				</pre></td>
+				<td>Keyword arguments cannot be used in JavaScript. Giving more or less arguments than are declared in the definition is not an error. Missing arguments are set to <i>undefined</i>. All arguments, including extra arguments, can be accessed through the special variable <i>arguments</i>.</td>
+			</tr>
+		</table>
+	</body>
+</html>
