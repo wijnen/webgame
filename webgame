@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 # Webgame main executable.
-# vim: set foldmethod=marker :
 
 '''
 This file is part of the webgame system.
@@ -31,20 +30,84 @@ import time
 import json
 import re
 import collections
-
-sys.path = [os.path.dirname(sys.argv[0])] + sys.path
-import game
+import importlib
 # }}}
 
-fhs.module_info('webgame', 'helper for webgame framework', '0.2', 'Bas Wijnen <wijnen@debian.org>')
-fhs.module_option('webgame', 'port', 'network port to listen for client connections on', default = '8891')
-fhs.module_option('webgame', 'tls', 'use encrypted connection', argtype = bool)
+class Transaction:	# Singleton class {{{
+	def __init__(self):
+		self.instance = None
+		self.phase = 'idle'
+		self.name = None
+		self.args = None
+	def enter(self, instance):
+		assert self.instance is None
+		assert self.args is None
+		assert self.phase == 'idle'
+		self.phase = 'ready'
+		self.instance = instance
+	def __enter__(self):
+		assert self.instance is not None
+		assert self.phase in ('ready', 'calling', 'called')
+		self.phase = 'busy'
+		self.instance.game.broadcast.webgame('start')
+	def __exit__(self, *exc):
+		assert self.instance is not None
+		assert self.phase == 'busy'
+		self.phase = 'ready'
+		self.instance.game.broadcast.webgame('finish', self.name, self.args)
+		self.name = None
+		self.args = None
+	def leave(self, instance):
+		assert self.instance is instance
+		assert self.phase == 'ready'
+		self.phase = 'idle'
+		self.instance = None
+	def __call__(self, *args):
+		assert self.instance is not None
+		assert self.phase == 'calling'
+		assert self.args is None
+		self.phase = 'called'
+		self.args = args
+		return self
+	def __getattr__(self, attr):
+		assert self.instance is not None
+		assert self.phase == 'ready'
+		assert self.name is None
+		self.name = attr
+		self.phase = 'calling'
+		return self
 
-server = None
+transaction = Transaction()
+# }}}
 
-# custom log function with modified file name
-def log(*msg):
-	websocketd.log(*msg, filename = 'webgame', depth = 1)
+# Global variables. {{{
+# All connections (both viewers and players); keys are names.
+connections = {}
+
+# Generator type, for checking if things are generators.
+generator_type = type((lambda: (yield))())
+
+# All currently running games.
+instances = {}
+
+# Title game instance.
+title_game = None
+
+# Commands that work always.
+cmds = {}
+
+# Number of players; this is created from game[].num_players.
+# Keys are the same as the keys in game.
+# Every value is a function which accepts a requested number of players as argument and returns a resulting actual number of players.
+_num_players = {}
+
+# Game settings; this is created from game[].settings.
+# Keys are the same as the keys in game.
+_settings = {}
+# }}}
+
+# Translations are done in the browser. This allows marking strings as translatable.
+_ = lambda x: x
 
 # Shared object handling. {{{
 '''The Shared_Object, Shared_Instance and Shared_Array behave as javascript
@@ -203,8 +266,6 @@ class Shared_Instance(collections.abc.MutableMapping): # {{{
 		return ret
 	def __str__(self):
 		return '<shared instance ' + str(self._json()) + ' >'
-# Make it accessible from main.
-game.Shared = Shared_Instance
 # }}}
 
 class Shared_Array(collections.abc.MutableSequence): # {{{
@@ -362,32 +423,51 @@ def broadcast_shared(target, path, value, group = None): # {{{
 # }}}
 # }}}
 
-# Global variables. {{{
-# All connections (both viewers and players); keys are names.
-connections = {}
-
-# Generator type, for checking if things are generators.
-generator_type = type((lambda: (yield))())
-
-# All currently running games.
-instances = {}
-
-# Title game instance.
-title_game = None
-
-# Commands that work always.
-cmds = {}
-
-# Number of players; this is created from game.num_players.
-_num_players = None
-
-# Game settings; this is created from game.settings.
-_settings = None
-
-# Mark translations.
-_ = lambda x: x
-game._ = _
+# Read info for all games. {{{
+sys.path = [os.path.dirname(sys.argv[0])] + sys.path
+game = {}
+for name in ('game',):
+	game[name] = importlib.import_module(name)
+	# Set up some globals.
+	game[name].transaction = transaction
+	game[name].log = websocketd.log
+	game[name]._ = _
+	game[name].Shared = Shared_Instance
+	assert hasattr(game[name], 'num_players')
+	if isinstance(game[name].num_players, int):
+		_num_players[name] = lambda x: game[name].num_players
+	elif isinstance(game[name].num_players, (tuple, list)):
+		_num_players[name] = lambda x: x['num_players'] if x['num_players'] in game[name].num_players else game[name].num_players[0]
+	else:
+		_num_players[name] = game[name].num_players
+	# Set up settings.
+	if not hasattr(game[name], 'settings'):
+		_settings[name] = []
+	else:
+		_settings[name] = game[name].settings[:]
+	if not any(s['key'] == 'name' for s in _settings[name]):
+		_settings[name].insert(0, {'key': 'name', 'type': 'string', 'name': _('Game Name')})
+	if isinstance(game[name].num_players, (tuple, list)) and not any(s['key'] == 'num_players' for s in _settings[name]):
+		if _settings[name][0]['key'] == 'name':
+			p = 1
+		else:
+			p = 0
+		if len(game[name].num_players) <= 5:
+			_settings[name].insert(p, {'key': 'num_players', 'type': 'radio', 'options': game[name].num_players, 'name': _('Number of Players')})
+		else:
+			_settings[name].insert(p, {'key': 'num_players', 'type': 'select', 'options': game[name].num_players, 'name': _('Number of Players')})
 # }}}
+
+fhs.option('port', 'network port to listen for client connections on', default = '8891')
+fhs.option('tls', 'use encrypted connection', argtype = bool)
+fhs.option('keep', 'keep a game running when the last player quits', argtype = bool)
+fhs.init(help = 'helper for webgame framework', version = '0.2', contact = 'Bas Wijnen <wijnen@debian.org>', game = True)
+
+server = None
+
+# custom log function with modified file name
+def log(*msg):
+	websocketd.log(*msg, filename = 'webgame', depth = 1)
 
 class Player: # Class for player objects. {{{
 	'''This class is used for player objects.
@@ -445,22 +525,24 @@ class Instance: # Class for game instances. {{{
 	This class handles a running game.
 	It contains one object of the game.Game class, which is defined in the game file.
 	'''
-	def __init__(self, cls, settings, *args):
+	def __init__(self, gametype, settings, *args):
 		'''Set up the instance.
 		Initialize the Game object.
 		Add players.
 		Set up shared objects.
 		args is not used; it is present to not crash on invalid input.
 		'''
-		self.timeouts = {}
-		self.tasks = []
-		self.game = cls()
-		self.game.launch = self.launch
-		self.game.stop_all_tasks = self.stop_all_tasks
-		self.game.pause = self.pause
 		assert isinstance(settings, dict)
 		assert all(isinstance(x, str) for x in settings)
 		assert 'name' in settings
+		assert gametype == '' or gametype in game
+		self.gametype = gametype
+		self.timeouts = {}
+		self.tasks = []
+		self.game = Title() if gametype == '' else game[gametype].Game()
+		self.game.launch = self.launch
+		self.game.stop_all_tasks = self.stop_all_tasks
+		self.game.pause = self.pause
 		name = settings['name']
 		n = name
 		i = 0
@@ -486,7 +568,7 @@ class Instance: # Class for game instances. {{{
 		# Set up players.
 		if name != '':
 			# Figure out number of players.
-			num_players = _num_players(settings)
+			num_players = _num_players[gametype](settings)
 			title_game.game.Public.games[name] = [None] * num_players
 		else:
 			num_players = 0
@@ -702,7 +784,7 @@ class Instance: # Class for game instances. {{{
 		This function is never called by the system. It can only be called from the Game class.
 		'''
 		# FIXME: removing players while the game is running is broken.
-		assert len(self.game.players) > _num_players[0]
+		assert len(self.game.players) > _num_players[self.gametype][0]
 		assert p < len(self.game.players)
 		if hasattr(self.game, 'player_removed'):
 			self.game.player_removed(p)
@@ -789,6 +871,15 @@ class Args(dict): # Class for command arguments; ordered dict. {{{
 		self.length = len(a)
 	def __len__(self):
 		return self.length
+	def pop(self, idx = -1):
+		if idx < 0:
+			idx += self.length
+		ret = self[idx]
+		for i in range(idx, self.length - 1):
+			self[i] = self[i + 1]
+		del self[self.length - 1]
+		self.length -= 1
+		return ret
 	def __iter__(self):
 		for i in range(self.length):
 			yield self[i]
@@ -909,7 +1000,6 @@ class Title: # Class for default title game object. {{{
 		This works with the default title javascript code.
 		It allows players to set their names, create a game, or join, return to and view a game.
 		'''
-		self.Public.title = game.name
 		self.Public.games = {}
 		while True:
 			cmd = (yield ('new', 'join', 'return', 'view'))
@@ -921,9 +1011,16 @@ class Title: # Class for default title game object. {{{
 				connection._instance.game.reply(_('no game name specified'))
 				continue
 			if command == 'new':
+				if len(cmd['args']) < 2:
+					connection._instance.game.reply(_('no game name specified'))
+					continue
+				gametype = cmd['args'].pop(0)
+				if gametype not in game:
+					connection._instance.game.reply(_('game type does not exist'))
+					continue
 				# Launching the game breaks the transaction logic. Hack around that by breaking the pending transaction in two parts.
 				transaction.leave(title_game)
-				i = Instance(game.Game, *cmd['args'])
+				i = Instance(gametype, *cmd['args'])
 				transaction.enter(title_game)
 				cmd['args'][0] = i.game.Public.name
 				i.game.Public.owner = 0
@@ -938,11 +1035,8 @@ class Title: # Class for default title game object. {{{
 						connection._num = i
 						break
 				else:
-					if _num_players[2] and (_num_players[1] is None or len(instance.game.players) < _num_players[1]):
-						connection._num = instance.add_player(False)
-					else:
-						connection._instance.game.reply(_('no more players allowed'))
-						continue
+					connection._instance.game.reply(_('no more players allowed'))
+					continue
 				instance.game.Public.players[connection._num].name = connection._name
 				instance.game.players[connection._num].connection = connection
 				connection._instance = instance
@@ -1004,7 +1098,8 @@ def admin(args): # {{{
 				connection._instance.game.Public.owner = None
 			connection._instance.game.players[connection._num].connection = None
 			connection._instance.game.Public.players[connection._num].name = None
-			if (game.autokill or connection._instance.ended) and all(p.connection is None for p in connection._instance.game.players):
+			config = fhs.get_config()
+			if (not config['keep'] or connection._instance.ended) and all(p.connection is None for p in connection._instance.game.players):
 				# Last player left; destroy game if it was still running.
 				end = connection._instance
 			else:
@@ -1089,54 +1184,7 @@ def admin(args): # {{{
 # }}}
 
 
-class Transaction:	# Singleton class {{{
-	def __init__(self):
-		self.instance = None
-		self.phase = 'idle'
-		self.name = None
-		self.args = None
-	def enter(self, instance):
-		assert self.instance is None
-		assert self.args is None
-		assert self.phase == 'idle'
-		self.phase = 'ready'
-		self.instance = instance
-	def __enter__(self):
-		assert self.instance is not None
-		assert self.phase in ('ready', 'calling', 'called')
-		self.phase = 'busy'
-		self.instance.game.broadcast.webgame('start')
-	def __exit__(self, *exc):
-		assert self.instance is not None
-		assert self.phase == 'busy'
-		self.phase = 'ready'
-		self.instance.game.broadcast.webgame('finish', self.name, self.args)
-		self.name = None
-		self.args = None
-	def leave(self, instance):
-		assert self.instance is instance
-		assert self.phase == 'ready'
-		self.phase = 'idle'
-		self.instance = None
-	def __call__(self, *args):
-		assert self.instance is not None
-		assert self.phase == 'calling'
-		assert self.args is None
-		self.phase = 'called'
-		self.args = args
-		return self
-	def __getattr__(self, attr):
-		assert self.instance is not None
-		assert self.phase == 'ready'
-		assert self.name is None
-		self.name = attr
-		self.phase = 'calling'
-		return self
-
-transaction = Transaction()
-# }}}
-
-def show(obj, indent = '', prefix = ''):
+def show(obj, indent = '', prefix = ''): # {{{
 	if isinstance(obj, (Shared_Array, tuple, list)):
 		print(indent + prefix + '[')
 		for i, v in enumerate(obj):
@@ -1149,7 +1197,9 @@ def show(obj, indent = '', prefix = ''):
 		print(indent + '}')
 	else:
 		print(indent + prefix + repr(obj))
-def adminjoin(name = None):
+# }}}
+
+def adminjoin(name = None): # {{{
 	if name is None:
 		if len(instances) < 2:
 			name = ''
@@ -1167,67 +1217,26 @@ def stdinput(line):
 		exec(line.replace('###', '\n'), None, adminvars)
 	except:
 		traceback.print_exc()
+# }}}
 
 def Game(): # Main function to start a game. {{{
 	'''This function starts the system.
-	This function should not be confused with class game.Game, which defines the rules of the game.
+	This function should not be confused with class game[].Game, which defines the rules of the game.
 	This starts a title instance and sets up the server.
 	webgame-build automatically calls this function after the code in the game file is run.
 	'''
-	global server, title_game, _num_players, _settings
+	global server, title_game
 	# Set up module path.
 	sys.path = [os.path.join(os.curdir, 'modules')] + sys.path
-	# Set up the game name.
-	if not hasattr(game, 'name') or game.name is None:
-		game.name = os.path.basename(sys.argv[0]).capitalize()
-	# Initialize fhs module.
-	if not fhs.initialized:
-		fhs.init(packagename = game.name.lower(), game = True)
-	# Set up some globals.
-	game.transaction = transaction
-	game.log = websocketd.log
-	# Set up other constants.
-	if not hasattr(game, 'autokill'):
-		game.autokill = True
-	# Set up number of players.
-	assert hasattr(game, 'num_players')
-	def read_num_players(settings, min_players, max_players):
-		assert 'num_players' in settings
-		return min(max(settings['num_players'], min_players, max_players))
-	if isinstance(game.num_players, int):
-		_num_players = lambda x: game.num_players
-	elif isinstance(game.num_players, (tuple, list)):
-		_num_players = lambda x: x['num_players'] if x['num_players'] in game.num_players else game.num_players[0]
-	else:
-		_num_players = game.num_players
-	# Set up settings.
-	if not hasattr(game, 'settings'):
-		_settings = []
-	else:
-		_settings = game.settings[:]
-	if not any(s['key'] == 'name' for s in _settings):
-		_settings.insert(0, {'key': 'name', 'type': 'string', 'name': _('Game Name')})
-	if isinstance(game.num_players, (tuple, list)) and not any(s['key'] == 'num_players' for s in _settings):
-		if _settings[0]['key'] == 'name':
-			p = 1
-		else:
-			p = 0
-		if len(game.num_players) <= 5:
-			_settings.insert(p, {'key': 'num_players', 'type': 'radio', 'options': game.num_players, 'name': _('Number of Players')})
-		else:
-			_settings.insert(p, {'key': 'num_players', 'type': 'select', 'options': game.num_players, 'name': _('Number of Players')})
 	# Set up commands.
 	cmds['webgame'] = {None: (admin, None)}
-	if hasattr(game, 'commands'):
-		for c in game.commands:
-			cmds[c] = {None: game.commands[c]}
 	# Start debug console on stdio.
 	global stdio
 	stdio = network.wrap(sys.stdin, sys.stderr)
 	stdio.readlines(stdinput)
 	# Start up websockets server.
-	config = fhs.module_get_config('webgame')
-	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html', os.path.join('html', game.name.lower()))]
+	config = fhs.get_config()
+	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html',) + tuple(os.path.join('html', name) for name in game)]
 	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = sum(httpdirs, []), proxy = 'game')
 	server.handle_ext('png', 'image/png')
 	server.handle_ext('svg', 'image/svg+xml')
@@ -1244,16 +1253,15 @@ def Game(): # Main function to start a game. {{{
 	server.handle_ext('vert', 'text/plain')
 	server.handle_ext('glsl', 'text/plain')
 	# Set up title page.
-	if hasattr(game, 'Title'):
-		title_game = Instance(game.Title, {'name': ''})
-	else:
-		title_game = Instance(Title, {'name': ''})
+	title_game = Instance('', {'name': ''})
 	# Add the admin to the title game.
 	adminjoin()
-	log('Game "{0}" started, listening on port {1}'.format(game.name, config['port']))
+	log('Game started, listening on port {0}'.format(config['port']))
 	# Main loop.
 	websocketd.fgloop()
 	# End of game.  Do anything to clean up?
 # }}}
 
 Game()
+
+# vim: set foldmethod=marker :

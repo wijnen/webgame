@@ -582,7 +582,7 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 				view[3] += diff[1] / factor;
 				webgame.viewport = view;
 			});
-			var scroll = function(event) {
+			var wheel = function(event) {
 				var view = webgame.viewport;
 				var pos = pos_from_event(event);
 				for (var i = 0; i < 2; ++i) {
@@ -590,15 +590,14 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 					view[2 * i + 1] -= pos[1];
 				}
 				for (var i = 0; i < view.length; ++i)
-					view[i] *= 1 + event.detail / (event.shiftKey ? 100 : 10);
+					view[i] *= 1 + event.deltaY / (event.shiftKey ? 100 : 10);
 				for (var i = 0; i < 2; ++i) {
 					view[2 * i] += pos[0];
 					view[2 * i + 1] += pos[1];
 				}
 				webgame.viewport = view;
 			};
-			window.AddEvent('mousewheel', scroll);
-			window.AddEvent('DOMMouseScroll', scroll);
+			window.AddEvent('wheel', wheel);
 		}
 	}
 	window.camera.activate();
@@ -753,65 +752,93 @@ _webgame.init = function(languages, settings) { // {{{
 	_webgame.game.AddClass('hidden');
 	// }}}
 	// Set up settings table. {{{
-	var table = document.getElementById('settings');
+	var gameselect = document.getElementById('gameselect');
+	gameselect.ClearAll();
+	var gamesettings = document.getElementById('settings');
+	_webgame.title_games = [];
+	gamesettings.ClearAll();
 	_webgame.new_settings = {};
+	var games = [];
+	var settingstables = [];
+	_webgame.select_game = function() { // {{{
+		for (var g = 0; g < games.length; ++g) {
+			if (games[g].selected) {
+				settingstables[g].style.display = '';
+			}
+			else {
+				settingstables[g].style.display = 'none';
+			}
+		}
+	} // }}}
 	var radiocount = 0;
-	for (var s = 0; s < settings.length; ++s) {
-		var setting = settings[s];
-		var tr = table.AddElement('tr');
-		var name = tr.AddElement('td');
-		var value = tr.AddElement('td');
-		name.AddText(setting.name);
-		var key = (setting.key === undefined ? setting.name : setting.key);
-		console.assert(_webgame.new_settings[key] === undefined);
-		if (setting.desc !== undefined)
-			name.title = setting.desc;
-		if (setting.type == 'number') {
-			var input = value.AddElement('input');
-			input.type = 'number';
-			input.value = (setting['default'] === undefined ? 0 : setting['default']);
-			input.key = key;
-			_webgame.new_settings[key] = Number(input.value);
-			input.AddEvent('change', function() { _webgame.new_settings[this.key] = Number(this.value); });
-		}
-		else if (setting.type == 'string') {
-			var input = value.AddElement('input');
-			input.type = 'text';
-			input.value = (setting['default'] === undefined ? key == 'name' ? _("$1's game")(my_name) : '' : setting['default']);
-			input.key = key;
-			_webgame.new_settings[key] = input.value;
-			input.AddEvent('change', function() { _webgame.new_settings[this.key] = this.value; });
-		}
-		else if (setting.type == 'select') {
-			_webgame.new_settings[key] = 0;
-			var select = value.AddElement('select');
-			for (var o = 0; o < setting.options.length; ++o) {
-				var option = setting.options[o];
-				select.AddElement('option').AddText(option);
+	for (var gamename in settings) {
+		var table = gamesettings.AddElement('table');
+		settingstables.push(table);
+		var option = gameselect.AddElement('option').AddText(gamename);
+		option.value = gamename;
+		games.push(option);
+		_webgame.new_settings[gamename] = {};
+		for (var s = 0; s < settings[gamename].length; ++s) {
+			var setting = settings[gamename][s];
+			var tr = table.AddElement('tr');
+			var name = tr.AddElement('td');
+			var value = tr.AddElement('td');
+			name.AddText(setting.name);
+			var key = (setting.key === undefined ? setting.name : setting.key);
+			console.assert(_webgame.new_settings[gamename][key] === undefined);
+			if (setting.desc !== undefined)
+				name.title = setting.desc;
+			if (setting.type == 'number') {
+				var input = value.AddElement('input');
+				input.type = 'number';
+				input.value = (setting['default'] === undefined ? 0 : setting['default']);
+				input.key = key;
+				input.gamename = gamename;
+				_webgame.new_settings[gamename][key] = Number(input.value);
+				input.AddEvent('change', function() { _webgame.new_settings[this.gamename][this.key] = Number(this.value); });
 			}
-			select.key = key;
-			select.AddEvent('change', function() { _webgame.new_settings[this.key] = this.selectedIndex; });
-		}
-		else if (setting.type == 'radio') {
-			radiocount += 1;
-			_webgame.new_settings[key] = 0;
-			for (var o = 0; o < setting.options.length; ++o) {
-				var option = setting.options[o];
-				if (o > 0)
-					value.AddElement('br');
-				var label = value.AddElement('label');
-				var radio = label.AddElement('input');
-				radio.type = 'radio';
-				radio.name = 'webgameradio' + radiocount;
-				label.AddText(option);
-				radio.key = key;
-				radio.retval = option;
-				radio.AddEvent('click', function() { _webgame.new_settings[this.key] = this.retval; });
-				if (setting['default'] == option || o == 0)
-					radio.checked = true;
+			else if (setting.type == 'string') {
+				var input = value.AddElement('input');
+				input.type = 'text';
+				input.value = (setting['default'] === undefined ? key == 'name' ? _("$1's game")(my_name) : '' : setting['default']);
+				input.key = key;
+				input.gamename = gamename;
+				_webgame.new_settings[gamename][key] = input.value;
+				input.AddEvent('change', function() { _webgame.new_settings[this.gamename][this.key] = this.value; });
 			}
-		}
-		else if (setting.type == 'multiple') {
+			else if (setting.type == 'select') {
+				_webgame.new_settings[gamename][key] = 0;
+				var select = value.AddElement('select');
+				for (var o = 0; o < setting.options.length; ++o) {
+					var option = setting.options[o];
+					select.AddElement('option').AddText(option);
+				}
+				select.gamename = gamename;
+				select.key = key;
+				select.AddEvent('change', function() { _webgame.new_settings[this.gamename][this.key] = this.selectedIndex; });
+			}
+			else if (setting.type == 'radio') {
+				radiocount += 1;
+				_webgame.new_settings[gamename][key] = 0;
+				for (var o = 0; o < setting.options.length; ++o) {
+					var option = setting.options[o];
+					if (o > 0)
+						value.AddElement('br');
+					var label = value.AddElement('label');
+					var radio = label.AddElement('input');
+					radio.type = 'radio';
+					radio.name = 'webgameradio' + radiocount;
+					label.AddText(option);
+					radio.gamename = gamename;
+					radio.key = key;
+					radio.retval = option;
+					radio.AddEvent('click', function() { _webgame.new_settings[this.gamename][this.key] = this.retval; });
+					if (setting['default'] == option || o == 0)
+						radio.checked = true;
+				}
+			}
+			else if (setting.type == 'multiple') {
+			}
 		}
 	}
 	// }}}
@@ -977,7 +1004,9 @@ _webgame.title_view = function() { // {{{
 }; // }}}
 
 _webgame.title_new = function() { // {{{
-	game('new', _webgame.new_settings);
+	var gameselect = document.getElementById('gameselect');
+	var gamename = gameselect.options[gameselect.selectedIndex].value;
+	game('new', gamename, _webgame.new_settings[gamename]);
 }; // }}}
 
 // Shared object handling.
