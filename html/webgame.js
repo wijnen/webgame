@@ -1034,8 +1034,12 @@ _webgame.finish = function(name, args) { // {{{
 			for (var key in _webgame.ui) {
 				var list = _webgame.ui[key];
 				for (var num = 0; num < list.length; ++num) {
-					if (list[num].node !== undefined)
-						del_div(list[num].node);
+					if (list[num].node !== undefined) {
+						if (list[num].node.context !== undefined)
+							del_canvas(list[num].node);
+						else
+							del_div(list[num].node);
+					}
 				}
 			}
 			_webgame.ui = {};
@@ -1368,15 +1372,20 @@ _webgame.update_ui = function() { // {{{
 			}
 			node.destroy();
 		}
-		else
-			del_div(_webgame.removing.pop());
+		else {
+			var node = _webgame.removing.pop();
+			if (node !== undefined)
+				del_canvas(node);
+			else
+				del_div(node);
+		}
 	}
 }; // }}}
 
 _webgame.handle_ui = function(key, data) { // {{{
 	// data is {source: object, target: [{node}], idx: array of int}.
 	var obj = window.ui[key];
-	var get_value = function(attr) {
+	var get_value = function(attr, raw) {
 		var target;
 		var args = [data.source].concat(data.idx);
 		if (webgame.use_3d) {
@@ -1391,7 +1400,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 			else
 				target = obj[attr];
 		}
-		if (typeof target == 'function')
+		if (!raw && typeof target == 'function')
 			return target.apply(data.target.node, args);
 		return target;
 	};
@@ -1528,9 +1537,18 @@ _webgame.handle_ui = function(key, data) { // {{{
 			var create_div = function() {
 				var size = get_value('size');
 				if (size !== undefined) {
-					var node = new_div.apply(undefined, size);
+					var node;
+					var canvas = get_value('canvas', true);	// Get raw canvas value (don't run function).
+					if (typeof canvas == 'function')
+						node = new_canvas(size[0], size[1], function(node) {
+							var args = [data.source].concat(data.idx);
+							canvas.apply(node, args);
+						});
+					else {
+						node = new_div.apply(undefined, size);
+						node.div.style.backgroundSize = size[2] + 'px,' + size[3] + 'px';
+					}
 					node.classes = {};
-					node.div.style.backgroundSize = size[2] + 'px,' + size[3] + 'px';
 					return node;
 				}
 				else {
