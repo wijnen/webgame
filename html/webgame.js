@@ -187,14 +187,18 @@ function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
 	});
 } // }}}
 
-function new_canvas(w, h, redraw, parent) { // {{{
+function new_canvas(w, h, redraw, obj, parent) { // {{{
 	var div = please.overlay.new_element();
 	var node = new please.GraphNode();
 	node.div = div;
 	(parent ? parent : graph).add(node);
 	div.bind_to_node(node);
 	node.canvas = div.AddElement('canvas');
-	node.canvas.redraw_func = function() {
+	node.canvas.redraw = function(obj) {
+		if (obj === undefined)
+			obj = canvas.last_obj;
+		else
+			canvas.last_obj = obj;
 		node.canvas.width = w * 2 * window.camera.orthographic_grid;
 		node.canvas.height = h * 2 * window.camera.orthographic_grid;
 		div.style.width = node.canvas.style.width = node.canvas.width / 2 + 'px';
@@ -203,7 +207,7 @@ function new_canvas(w, h, redraw, parent) { // {{{
 		node.context.scale(window.camera.orthographic_grid * 2, -window.camera.orthographic_grid * 2);
 		node.context.translate(w / 2, -h / 2);
 		if (redraw)
-			redraw(node);
+			redraw.call(node, obj);
 	};
 	_webgame.canvas_list.push(node.canvas);
 	node.canvas.AddEvent('click', function(event) {
@@ -214,7 +218,7 @@ function new_canvas(w, h, redraw, parent) { // {{{
 		event.local_location = [event.world_location[0] - node.location_x, event.world_location[1] - node.location_y, 0];
 		node.dispatch('click', event);
 	});
-	node.canvas.redraw_func();
+	node.canvas.redraw.call(node, obj);
 	return node;
 } // }}}
 
@@ -224,7 +228,7 @@ function del_canvas(node) { // {{{
 	please.overlay.remove_element(node.div);
 } // }}}
 
-function new_div(w, h, pw, ph, redraw, parent) { // {{{
+function new_div(w, h, pw, ph, redraw, obj, parent) { // {{{
 	var div = please.overlay.new_element();
 	var node = new please.GraphNode();
 	node.div = div;
@@ -233,11 +237,15 @@ function new_div(w, h, pw, ph, redraw, parent) { // {{{
 	div.bind_to_node(node);
 	div.style.width = pw + 'px';
 	div.style.height = ph + 'px';
-	div.redraw_func = function() {
+	div.redraw = function(obj) {
+		if (obj === undefined)
+			obj = div.last_obj;
+		else
+			div.last_obj = obj;
 		div.style.transformOrigin = 'top left';
 		div.style.transform = 'scale(' + w * window.camera.orthographic_grid / pw + ',' + h * window.camera.orthographic_grid / ph + ')';
 		if (redraw)
-			redraw(node);
+			redraw.call(node, obj);
 	};
 	_webgame.div_list.push(div);
 	div.AddEvent('click', function(event) {
@@ -245,7 +253,7 @@ function new_div(w, h, pw, ph, redraw, parent) { // {{{
 			return;
 		node.dispatch('click', event);
 	});
-	div.redraw_func();
+	div.redraw.call(node, obj);
 	return node;
 } // }}}
 
@@ -931,9 +939,9 @@ _webgame.resize_window = function(force) { // {{{
 
 window.AddEvent('mgrl_overlay_aligned', function() { // {{{
 	for (var c = 0; c < _webgame.canvas_list.length; ++c)
-		_webgame.canvas_list[c].redraw_func();
+		_webgame.canvas_list[c].redraw();
 	for (var d = 0; d < _webgame.div_list.length; ++d)
-		_webgame.div_list[d].redraw_func();
+		_webgame.div_list[d].redraw();
 }); // }}}
 
 window.AddEvent('mgrl_dom_context_changed', function() { // {{{
@@ -1532,18 +1540,18 @@ _webgame.handle_ui = function(key, data) { // {{{
 			if (data.target.node.overlay !== undefined)
 				data.target.node.overlay.visible = visible;
 		};
+		var canvas = get_value('canvas', true);	// Get raw canvas value (don't run function).
 		if (data.target.node === undefined) {
 			// Create this node. {{{
 			var create_div = function() {
 				var size = get_value('size');
 				if (size !== undefined) {
 					var node;
-					var canvas = get_value('canvas', true);	// Get raw canvas value (don't run function).
 					if (typeof canvas == 'function')
-						node = new_canvas(size[0], size[1], function(node) {
-							var args = [data.source].concat(data.idx);
-							canvas.apply(node, args);
-						});
+						node = new_canvas(size[0], size[1], function(src) {
+							var args = [src].concat(data.idx);
+							canvas.apply(this, args);
+						}, data.source);
 					else {
 						node = new_div.apply(undefined, size);
 						node.div.style.backgroundSize = size[2] + 'px,' + size[3] + 'px';
@@ -1662,6 +1670,8 @@ _webgame.handle_ui = function(key, data) { // {{{
 			// }}}
 		}
 		else {
+			if (typeof canvas == 'function' && data.target.node.canvas !== undefined)
+				data.target.node.canvas.redraw(data.source);
 			// Update the click callback so it uses the new src value when called.
 			if (obj.click !== undefined) {
 				data.target.node.selectable = true;
