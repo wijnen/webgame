@@ -29,6 +29,14 @@
 				<select id='language_select' onchange='_webgame.select_language();'>
 				</select>
 			</p>
+			<p>
+				<span class='translate'>Interface preference:</span>
+				<select id='dimensionselect'>
+					<option id='d2d' class='translate'>2-D</option>
+					<option id='d3d' selected='selected' class='translate'>3-D</option>
+				</select>
+			</p>
+
 			<div id='game'>
 				<hr/>
 				<h3 id='gamename'></h3>
@@ -63,7 +71,7 @@
 					<div class='frame'>
 						<h2 class='translate'>Create New Game</h2>
 						<p>
-							<select id='gameselect'></select>
+							<select id='gameselect' onchange='_webgame.change_gameselect()'></select>
 							<div id='settings'></div>
 							<button type='button' onclick="_webgame.title_new()" class='translate'>Create New Game</button>
 						</p>

@@ -18,7 +18,7 @@ All translatable strings are marked with _(), which is a no-op in the Python
 code. Translating happens in javascript.
 }}}'''
 
-# Imports. {{{
+# Imports and config. {{{
 import gettext
 import traceback
 import network
@@ -31,7 +31,16 @@ import json
 import re
 import collections
 import importlib
+fhs.option('port', 'network port to listen for client connections on', default = '8891')
+fhs.option('tls', 'use encrypted connection', argtype = bool)
+fhs.option('keep', 'keep a game running when the last player quits', argtype = bool)
+fhs.option('forbidden-exts', 'never load files with these extentions (comma-separated list)', default = '.blend,.blend1,~')
+fhs.init(help = 'Webgame framework', version = '0.3', contact = 'Bas Wijnen <wijnen@debian.org>', game = True)
 # }}}
+
+# custom log function with modified file name
+def log(*msg):
+	websocketd.log(*msg, filename = 'webgame', depth = 1)
 
 class Transaction:	# Singleton class {{{
 	def __init__(self):
@@ -96,13 +105,13 @@ title_game = None
 # Commands that work always.
 cmds = {}
 
-# Number of players; this is created from game[].num_players.
-# Keys are the same as the keys in game.
+# Number of players; this is created from games[].num_players.
+# Keys are the same as the keys in games.
 # Every value is a function which accepts a requested number of players as argument and returns a resulting actual number of players.
 _num_players = {}
 
-# Game settings; this is created from game[].settings.
-# Keys are the same as the keys in game.
+# Game settings; this is created from games[].settings.
+# Keys are the same as the keys in games.
 _settings = {}
 # }}}
 
@@ -424,50 +433,115 @@ def broadcast_shared(target, path, value, group = None): # {{{
 # }}}
 
 # Read info for all games. {{{
-sys.path = [os.path.dirname(sys.argv[0])] + sys.path
-game = {}
-for name in ('game',):
-	game[name] = importlib.import_module(name)
+gamedirs = fhs.read_data('games', dir = True, multiple = True)
+log('game dirs: %s' % repr(gamedirs))
+files = []
+for d in gamedirs:
+	for f in os.listdir(d):
+		log('checking %s' % f)
+		name = os.path.join(d, f)
+		if not os.path.exists(os.path.join(name, f + os.extsep + 'py')) or not os.path.exists(os.path.join(name, 'html')):
+			continue
+		log('Found game: %s' % name)
+		files.append((name, f))
+games = {}
+for gamedir in files:
+	name = gamedir[1]
+	sys.path.insert(0, gamedir[0])
+	games[name] = importlib.import_module(name)
+	sys.path.pop(0)
 	# Set up some globals.
-	game[name].transaction = transaction
-	game[name].log = websocketd.log
-	game[name]._ = _
-	game[name].Shared = Shared_Instance
-	assert hasattr(game[name], 'num_players')
-	if isinstance(game[name].num_players, int):
-		_num_players[name] = lambda x: game[name].num_players
-	elif isinstance(game[name].num_players, (tuple, list)):
-		_num_players[name] = lambda x: x['num_players'] if x['num_players'] in game[name].num_players else game[name].num_players[0]
+	games[name].transaction = transaction
+	games[name].log = websocketd.log
+	games[name]._ = _
+	games[name].Shared = Shared_Instance
+	assert hasattr(games[name], 'num_players')
+	if isinstance(games[name].num_players, int):
+		_num_players[name] = (lambda name: (lambda x: games[name].num_players))(name)
+	elif isinstance(games[name].num_players, (tuple, list)):
+		_num_players[name] = (lambda name: (lambda x: x['num_players'] if x['num_players'] in games[name].num_players else games[name].num_players[0]))(name)
 	else:
-		_num_players[name] = game[name].num_players
+		_num_players[name] = games[name].num_players
 	# Set up settings.
-	if not hasattr(game[name], 'settings'):
-		_settings[name] = []
+	if not hasattr(games[name], 'settings'):
+		_settings[name] = {'settings': []}
 	else:
-		_settings[name] = game[name].settings[:]
-	if not any(s['key'] == 'name' for s in _settings[name]):
-		_settings[name].insert(0, {'key': 'name', 'type': 'string', 'name': _('Game Name')})
-	if isinstance(game[name].num_players, (tuple, list)) and not any(s['key'] == 'num_players' for s in _settings[name]):
-		if _settings[name][0]['key'] == 'name':
+		_settings[name] = {'settings': games[name].settings[:]}
+	# Build lists of loaded files. {{{
+	loader = [[], []]
+	can = [False, False]
+	targets = [[], []]
+	jssrc = os.path.join(gamedir[0], 'html') # Place where web content can be found by this program.
+	def find(srcbase, prefix, antisuffix, specific): # {{{
+		'''Find files in some directory.
+		srcbase is a directory like <jssrc>/img-2d
+		prefix is the base directory for this subdir search (used for recursive calls).
+		antisuffix is the suffix for files to ignore, like -3d
+		specific is a suffix string to indicate the dimensionality, or None if not specific. It's only passed into the output.
+
+		Returns a list of dicts of {'src': source file, 'link': dest url to be used from javascript, 'specific': specific}
+		'''
+		if not os.path.exists(srcbase):
+			return []
+		files = os.listdir(srcbase)
+		subdirs = [x for x in files if os.path.isdir(os.path.join(srcbase, x))]
+		ret = [{'src': os.path.join(srcbase, x), 'link': prefix + '/' + x if len(prefix) > 0 else x, 'specific': specific} for x in files if not x.startswith('.') and not x in subdirs and not os.path.splitext(x)[0].endswith(antisuffix) and os.path.splitext(x)[1] not in fhs.get_config()['forbidden-exts']]
+		for sd in subdirs:
+			ret.extend(find(os.path.join(srcbase, sd), 'games/' + (prefix + '/' + sd if len(prefix) > 0 else sd), antisuffix, specific))
+		return ret
+	# }}}
+
+	for suffix, antisuffix, use_3d in (('-2d', '-3d', False), ('-3d', '-2d', True)):
+		for base in ('img', 'jta', 'gani', 'audio', 'text'):
+			suffixtargets = find(os.path.join(jssrc, base + suffix), '', antisuffix, suffix)
+			can[use_3d] = can[use_3d] or os.path.exists(os.path.join(jssrc, base + suffix))
+			targets[use_3d].extend(suffixtargets)
+			targets[use_3d].extend(find(os.path.join(jssrc, base), '', antisuffix, None))
+		if len(targets[use_3d]) > 0:
+			can[use_3d] = can[use_3d] or any(os.path.splitext(x['src'])[0].endswith(suffix) for x in targets[use_3d])
+			loader[use_3d] = [(f['link'], f['specific']) for f in targets[use_3d]]
+			loader[use_3d].sort(key = lambda x: ([None, '-2d', '-3d'].index(x[1]), x[0]))
+		else:
+			loader[use_3d] = []
+
+	if not any(can) or all(can):
+		use3d = True
+	elif can[False]:
+		use3d = False
+	else:
+		use3d = True
+
+
+	js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
+	css = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'css') and not os.path.isdir(os.path.join(jssrc, x))]
+	languages = []
+	scripts = ['games/{}/{}'.format(name, f) for f in js] + ['games/{}/lang/{}.js'.format(name, lang) for lang in languages]
+	scripts.sort()
+	styles = ['games/{}/{}'.format(name, f) for f in css]
+	styles.sort()
+	# }}}
+
+	_settings[name]['name'] = name if not hasattr(games[name], 'name') else games[name].name
+	print('name', games[name].name, file = sys.stderr)
+	_settings[name]['load3d'] = [x[0] for x in loader[True]]
+	_settings[name]['load2d'] = [x[0] for x in loader[False]]
+	_settings[name]['use_3d'] = use3d
+	_settings[name]['script'] = scripts
+	_settings[name]['style'] = styles
+	if not any(s['key'] == 'name' for s in _settings[name]['settings']):
+		_settings[name]['settings'].insert(0, {'key': 'name', 'type': 'string', 'name': _('Game Name')})
+	if isinstance(games[name].num_players, (tuple, list)) and not any(s['key'] == 'num_players' for s in _settings[name]['settings']):
+		if _settings[name]['settings'][0]['key'] == 'name':
 			p = 1
 		else:
 			p = 0
-		if len(game[name].num_players) <= 5:
-			_settings[name].insert(p, {'key': 'num_players', 'type': 'radio', 'options': game[name].num_players, 'name': _('Number of Players')})
+		if len(games[name].num_players) <= 5:
+			_settings[name]['settings'].insert(p, {'key': 'num_players', 'type': 'radio', 'options': games[name].num_players, 'name': _('Number of Players')})
 		else:
-			_settings[name].insert(p, {'key': 'num_players', 'type': 'select', 'options': game[name].num_players, 'name': _('Number of Players')})
+			_settings[name]['settings'].insert(p, {'key': 'num_players', 'type': 'select', 'options': games[name].num_players, 'name': _('Number of Players')})
 # }}}
 
-fhs.option('port', 'network port to listen for client connections on', default = '8891')
-fhs.option('tls', 'use encrypted connection', argtype = bool)
-fhs.option('keep', 'keep a game running when the last player quits', argtype = bool)
-fhs.init(help = 'helper for webgame framework', version = '0.2', contact = 'Bas Wijnen <wijnen@debian.org>', game = True)
-
 server = None
-
-# custom log function with modified file name
-def log(*msg):
-	websocketd.log(*msg, filename = 'webgame', depth = 1)
 
 class Player: # Class for player objects. {{{
 	'''This class is used for player objects.
@@ -535,11 +609,11 @@ class Instance: # Class for game instances. {{{
 		assert isinstance(settings, dict)
 		assert all(isinstance(x, str) for x in settings)
 		assert 'name' in settings
-		assert gametype == '' or gametype in game
+		assert gametype == '' or gametype in games
 		self.gametype = gametype
 		self.timeouts = {}
 		self.tasks = []
-		self.game = Title() if gametype == '' else game[gametype].Game()
+		self.game = Title() if gametype == '' else games[gametype].Game()
 		self.game.launch = self.launch
 		self.game.stop_all_tasks = self.stop_all_tasks
 		self.game.pause = self.pause
@@ -563,6 +637,7 @@ class Instance: # Class for game instances. {{{
 		self.game.Public = Shared_Object(['Public'], None, name)
 		self.game.Public._live()
 		self.game.Public.name = name
+		self.game.Public.type = gametype
 		self.game.Public.players = []
 		self.game.Public.viewers = []
 		# Set up players.
@@ -577,7 +652,7 @@ class Instance: # Class for game instances. {{{
 			self.add_player(True)
 		# Start game.
 		self.launch(self.game.run(), 'main', run_now = True)
-		log("started new instance '{0}'".format(name))
+		log("started new instance of {0}: '{1}'".format(gametype, name))
 
 	def close(self):
 		'''Stop instance. All tasks are aborted.'''
@@ -990,15 +1065,13 @@ class Connection: # {{{
 		return wrap
 # }}}
 
-class Title: # Class for default title game object. {{{
-	'''Class for the default title game instance.
+class Title: # Class for title game object. {{{
+	'''Class for the title game instance.
 	The system sets up one title instance and allows starting any number of Game instances.
-	If the game does not define a class Title, this class is used as default for the title instance.
 	'''
 	def run(self):
 		'''Run the title "game".
-		This works with the default title javascript code.
-		It allows players to set their names, create a game, or join, return to and view a game.
+		This allows players to set their names, create a game, or join, return to and view a game.
 		'''
 		self.Public.games = {}
 		while True:
@@ -1015,7 +1088,7 @@ class Title: # Class for default title game object. {{{
 					connection._instance.game.reply(_('no game name specified'))
 					continue
 				gametype = cmd['args'].pop(0)
-				if gametype not in game:
+				if gametype not in games:
 					connection._instance.game.reply(_('game type does not exist'))
 					continue
 				# Launching the game breaks the transaction logic. Hack around that by breaking the pending transaction in two parts.
@@ -1236,7 +1309,7 @@ def Game(): # Main function to start a game. {{{
 	stdio.readlines(stdinput)
 	# Start up websockets server.
 	config = fhs.get_config()
-	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html',) + tuple(os.path.join('html', name) for name in game)]
+	httpdirs = [fhs.read_data(x, opened = False, multiple = True, dir = True) for x in ('html',) + tuple(os.path.join('html', name) for name in games)]
 	server = websocketd.RPChttpd(config['port'], Connection, tls = config['tls'], httpdirs = sum(httpdirs, []), proxy = 'game')
 	server.handle_ext('png', 'image/png')
 	server.handle_ext('svg', 'image/svg+xml')

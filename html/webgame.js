@@ -1,48 +1,16 @@
 // use strict;
 // vim: set foldmethod=marker :
 
-// Functions and variables which can be replaced by user code. {{{
-
-function playercolor(num) { // {{{
-	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
-	num %= colors.length;
-	return colors[num];
-} // }}}
-
-function title_make_option(select, game, n) { // {{{
-	var ret = Create('option');
-	ret.value = game[0];
-	ret.players = game[1];
-	if (n >= select.options.length) {
-		select.appendChild(ret);
-	}
-	else {
-		select.insertBefore(ret, select.options[n]);
-	}
-	ret.update_players = function() {
-		var num = 0;
-		for (var p = 0; p < this.players.length; ++p) {
-			if (this.players[p] !== null)
-				num += 1;
-		}
-		this.ClearAll().AddText(this.value + ' (' + num + '/' + this.players.length + ')');
-	};
-	return ret;
-} // }}}
-
-// }}}
-
 // Functions and variables which can be used by user code. {{{
 
 var Public, Private;	// Shared data.
 var audio;	// Object with play/stop functions for all registered audio files as its members.
 var my_name = null;	// Player name, as returned by the server.
 var my_num = null;	// Player number of me, or null if not playing.
+var current = null;	// Currently active game, or null for title game.
 // Lesser used options are in the "webgame" object, to prevent namespace pollution.
 var webgame = {
-	use_3d: true,			// If true, the interface is 3d. Otherwise, it is 2d.
-	title_gamelist: [],		// Games which are available in the title screen.
-	title_select: undefined,	// Select element on title screen (for changing style).
+	use_3d: null,			// If true, the interface is 3d. Otherwise, it is 2d.
 	args: undefined,		// Object containing search string as key-value pairs. A null value means there was no argument.
 	mouse_navigation: true		// If true, allow changing the view with the mouse.
 };
@@ -189,6 +157,7 @@ function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
 
 function new_canvas(w, h, redraw, obj, parent) { // {{{
 	var div = please.overlay.new_element();
+	div.transform = true;
 	var node = new please.GraphNode();
 	node.div = div;
 	(parent ? parent : graph).add(node);
@@ -335,7 +304,7 @@ function show_chat(source, message) { // {{{
 			span.AddText(source);
 		else {
 			span.AddText(Public.players[source].name);
-			span.style.color = playercolor(source);
+			span.style.color = _webgame.playercolor(source);
 		}
 		p.AddText(': ');
 	}
@@ -353,7 +322,26 @@ function show_chat(source, message) { // {{{
 
 // Internal variables and functions. {{{
 // Global variables for internal use are all inside one object to prevent namespace pollution.
-var _webgame = { playerrows: [], viewerrows: [], watchlist: [], canvas_list: [], div_list: [], translations: {}, chat: show_chat, ui: {}, removing: [], prepare_update: [], argorder: [], viewport: [-20, -15, 20, 15] };
+var _webgame = { // {{{
+	playerrows: [],
+	viewerrows: [],
+	watchlist: [],
+	title_gamelist: [],
+	canvas_list: [],
+	div_list: [],
+	translations: {},
+	chat: show_chat,
+	ui: {},
+	removing: [],
+	prepare_update: [],
+	argorder: [],
+	viewport: [-20, -15, 20, 15],
+	loaded: {},
+	firstgame: true,
+	media_ready: false
+}; // }}}
+
+// Parse url arguments. {{{
 webgame.args = {};
 if (document.location.search[0] == '?') {
 	var s = document.location.search.substring(1).split('&');
@@ -369,8 +357,9 @@ if (document.location.search[0] == '?') {
 		_webgame.argorder.push(key);
 	}
 }
+// }}}
 
-_webgame.update_camera = function() {
+_webgame.update_camera = function() { // {{{
 	if (window.camera === undefined)
 		return;
 	if (webgame.use_3d) {
@@ -392,105 +381,59 @@ _webgame.update_camera = function() {
 		window.camera.location = function() { return [(webgame.viewport[0] + webgame.viewport[2]) / 2, (webgame.viewport[1] + webgame.viewport[3]) / 2, 100]; };
 	}
 	window.camera.update_camera();
-}
+} // }}}
 
 // System initialization.
 window.AddEvent('load', function() { // {{{
-	var xhr = new XMLHttpRequest();
-	xhr.AddEvent('loadend', function() {
-		var lines = xhr.responseText.split('\n');
-		var load = [[], []];
-		webgame.use_3d = true;
-		var head = document.getElementsByTagName('head')[0];
-		var loading = 0;
-		for (var l = 0; l < lines.length; ++l) {
-			if (lines[l].replace(/\s*/, '') == '')
-				continue;
-			var parts = lines[l].split(':', 2);
-			var key = parts[0].replace(/^\s*([a-z23]*)\s*$/, '$1');
-			var value = parts[1].replace(/^\s*(.*?)\s*$/, '$1');
-			if (key == 'title') {
-				document.getElementsByTagName('title')[0].ClearAll().AddText(value);
-				document.getElementById('game_title').ClearAll().AddText(value);
-			}
-			else if (key == 'base')
-				head.AddElement('base').href = value;
-			else if (key == 'script') {
-				loading += 1;
-				var script = head.AddElement('script');
-				script.AddEvent('load', load_done);
-				script.src = value;
-			}
-			else if (key == 'style') {
-				loading += 1;
-				var link = head.AddElement('link');
-				link.AddEvent('load', load_done);
-				link.rel = 'stylesheet';
-				link.href = value;
-			}
-			else if (key == 'use3d')
-				webgame.use_3d = (value == 'True');
-			else if (key == 'load') {
-				load[0].push(value);
-				load[1].push(value);
-			}
-			else if (key == 'load2d')
-				load[0].push(value);
-			else if (key == 'load3d')
-				load[1].push(value);
-			else
-				console.error('invalid line in config file:', lines[l]);
-		}
-		// First load all new javascript, then run remaining code and start m.grl machinery.
-		function load_done() {
-			loading -= 1;
-			if (loading > 0)
+	// Initialize game data.
+	_webgame.body = document.getElementsByTagName('body')[0];
+	_webgame.state = document.getElementById('state');
+	// Set up translations.
+	_translatable = {};
+	var elements = document.getElementsByClassName('translate');
+	for (var e = 0; e < elements.length; ++e) {
+		var tag = elements[e].textContent;
+		if (_translatable[tag] === undefined)
+			_translatable[tag] = [];
+		_translatable[tag].push(elements[e]);
+	}
+	Public = { state: '', name: '' };
+	Private = { state: '' };
+	set_state('');
+	var messages = {
+		webgame: function(target, arg1, arg2) {
+			_webgame[target](arg1, arg2);
+		},
+		'': function() {
+			if (current === null) {
+				show_chat(_('Error: server calls $1 during title game')(name));
 				return;
-			if (webgame.use_3d) {
-				if (webgame.args.interface == '2d') {
-					webgame.use_3d = false;
-					_webgame.force_2d = true;
-				}
 			}
-			if (webgame.use_3d)
-				please.gl.set_context('canvas');
+			var name = arguments[0];
+			var args = [];
+			for (var a = 1; a < arguments.length; ++a)
+				args.push(arguments[a]);
+			//console.info('calling', name, args);
+			if (window[current][name] === undefined)
+				show_chat(null, _('Error: server calls $1, which is undefined')(name))
 			else
-				please.dom.set_context('canvas');
-			var paths = ['img', 'jta', 'gani', 'audio', 'glsl', 'text'];
-			for (var i = 0; i < paths.length; ++i)
-				please.set_search_path(paths[i], 'webgame/' + paths[i]);
-			// Set up audio system.
-			// _webgame.audio is an object with the audio data for all the files.
-			// _webgame.audio is a flat object. Keys of _webgame.audio are filenames.
-			// audio has members which are functions to call play on _webgame.audio members.
-			// audio is not flat. Subdirectories are separate objects in audio.
-			// Example: _webgame.audio['sfx/bang.wav'] can be played with audio.sfx.bang().
-			// Because the files have not yet been loaded here,
-			// _webgame.audio is filled with filename keys, but values are path lists like ['sfx', 'bang'], not audio data.
-			// audio is not set up yet.
-			_webgame.audio = {};
-			audio = {};
-			var list = load[webgame.use_3d ? 1 : 0];
-			if (list.length > 0) {
-				for (var f = 0; f < list.length; ++f) {
-					please.load(list[f]);
-					var ext = list[f].substr(-4);
-					if (ext == '.ogg' || ext == '.wav' || ext == '.mp3')
-						_webgame.audio[list[f]] = list[f].substr(0, list[f].length - 4).split('/');
-				}
-			}
-			else
-				window.dispatchEvent(new CustomEvent('mgrl_media_ready'));
+				window[current][name].apply(window[current], args);
 		}
-		if (loading == 0)
-			load_done();
-	});
-	xhr.responseType = 'text';
-	xhr.open('GET', 'config.txt');
-	xhr.send();
-}); // }}}
+	};
+	_webgame.server = Rpc(messages,
+		function() {
+			_webgame.body.RemoveClass('disconnected');
+			// Title screen is set up through next update command.
+		},
+		function() {
+			_webgame.body.AddClass('disconnected');
+		}
+	);
+});
+
 
 window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
+	_webgame.media_ready = true;
 	if (webgame.use_3d) {
 		var square = '{"meta": {"jta_version": [0.1]}, "attributes": [{"vertices": {"position": {"type": "Array", "hint": "Float16Array", "item": 3, "data": "ADgAuAAAALgAOAAAALgAuAAAALgAuAEAADgAOAGAADgAuAGAADgAuAAAADgAOAAAALgAOAAAALgAuAEAALgAOAEAADgAOAGA"}, "tcoords": [{"type": "Array", "hint": "Float16Array", "item": 2, "data": "ADyNBo8GADyNBpEGADyNBo8GADyNBpEGADyNBgA8ADyPBgA8ADyNBgA8ADyPBgA8"}]}, "polygons": {"type": "Array", "hint": "Uint16Array", "item": 1, "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsA"}}], "models": {"Plane": {"parent": null, "extra": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": -0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "smooth_normals": false}, "state": {"world_matrix": {"type": "Array", "hint": "Float16Array", "item": 4, "data": "ADwAAAAAAAAAAAA8AAAAAAAAAAAAPAAAAAAAAAAAADw="}}, "struct": 0, "groups": {"default": {"start": 0, "count": 12}}}}, "packed_data": {}}';
 		please.media.assets['square'] = please.gl.__jta_model(square, 'square');
@@ -633,60 +576,27 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		})(a);
 	}
 
-	// Initialize game data.
-	_webgame.body = document.getElementsByTagName('body')[0];
-	_webgame.state = document.getElementById('state');
-	// Set up translations.
-	_translatable = {};
-	var elements = document.getElementsByClassName('translate');
-	for (var e = 0; e < elements.length; ++e) {
-		var tag = elements[e].textContent;
-		if (_translatable[tag] === undefined)
-			_translatable[tag] = [];
-		_translatable[tag].push(elements[e]);
-	}
-	Public = { state: '', name: '' };
-	Private = { state: '' };
-	set_state('');
-	var messages = {
-		webgame: function(target, arg1, arg2) {
-			_webgame[target](arg1, arg2);
-		},
-		'': function() {
-			var name = arguments[0];
-			var args = [];
-			for (var a = 1; a < arguments.length; ++a)
-				args.push(arguments[a]);
-			//console.info('calling', name, args);
-			if (window[name] === undefined)
-				show_chat(null, _('Error: server calls $1, which is undefined')(name))
-			else
-				window[name].apply(window, args);
-		}
-	};
-	_webgame.server = Rpc(messages,
-		function() { _webgame.body.RemoveClass('disconnected'); },
-		function() { _webgame.body.AddClass('disconnected'); });
-
 	window.AddEvent('resize', _webgame.resize_window);
 	var events = ['keydown', 'keyup'];
 	for (var e = 0; e < events.length; ++e) {
-		if ((!webgame.use_3d && window[events[e] + '2d'] !== undefined) || (webgame.use_3d && window[events[e] + '3d'] !== undefined) || window[events[e]] !== undefined) {
+		if ((!webgame.use_3d && window[current][events[e] + '2d'] !== undefined) || (webgame.use_3d && window[current][events[e] + '3d'] !== undefined) || window[current][events[e]] !== undefined) {
 			window.AddEvent(events[e], function(event) {
 				if (document.activeElement.tagName == 'INPUT' || document.activeElement.tagName == 'TEXTAREA' || Public === undefined || Public.name === undefined || Public.name == '')
 					return;
-				if (!webgame.use_3d && window[event.type + '2d'] !== undefined)
-					return window[event.type + '2d'](event);
-				else if (webgame.use_3d && window[events[e] + '3d'] !== undefined)
-					return window[event.type + '3d'](event);
+				if (!webgame.use_3d && window[current][event.type + '2d'] !== undefined)
+					return window[current][event.type + '2d'](event);
+				else if (webgame.use_3d && window[current][events[e] + '3d'] !== undefined)
+					return window[current][event.type + '3d'](event);
 				else
-					return window[event.type](event);
+					return window[current][event.type](event);
 			});
 		}
 	}
-	if (!webgame.use_3d && window.init2d !== undefined) window.init2d();
-	if (webgame.use_3d && window.init3d !== undefined) window.init3d();
-	if (window.init !== undefined) window.init();
+	if (!webgame.use_3d && window[current].init2d !== undefined) window[current].init2d();
+	if (webgame.use_3d && window[current].init3d !== undefined) window[current].init3d();
+	if (window[current].init !== undefined) window[current].init();
+	if (_webgame.load_cb)
+		_webgame.load_cb();
 })); // }}}
 
 // System commands.
@@ -697,6 +607,12 @@ _webgame.id = function(name, num) { // {{{
 }; // }}}
 
 _webgame.init = function(languages, settings) { // {{{
+	console.info(languages, settings);
+	_webgame.games = settings;
+	_webgame.gamelist = [];
+	for (var g in _webgame.games)
+		_webgame.gamelist.push(g);
+	_webgame.gamelist.sort();
 	// Set up language select. {{{
 	var have_languages = [];
 	for (var language in _webgame.translations)
@@ -743,7 +659,7 @@ _webgame.init = function(languages, settings) { // {{{
 	_webgame.mainscreen = document.getElementById('notitle');
 	_webgame.footer = document.getElementById('footer');
 	_webgame.title_selection = document.getElementById('titleselection');
-	webgame.title_select = document.getElementById('title_games');
+	_webgame.title_select = document.getElementById('title_games');
 	_webgame.canvas = document.getElementById('canvas');
 	_webgame.game = document.getElementById('game');
 	_webgame.owner = document.getElementById('owner');
@@ -778,16 +694,21 @@ _webgame.init = function(languages, settings) { // {{{
 			}
 		}
 	} // }}}
+	for (var g = 0; g < _webgame.gamelist.length; ++g) {
+		var game = _webgame.games[_webgame.gamelist[g]];
+		console.info(game.name);
+		select.AddElement('option').AddText(game.name);
+	}
 	var radiocount = 0;
-	for (var gamename in settings) {
+	for (var gamename in _webgame.games) {
 		var table = gamesettings.AddElement('table');
 		settingstables.push(table);
-		var option = gameselect.AddElement('option').AddText(gamename);
+		var option = gameselect.AddElement('option').AddText(_webgame.games[gamename].name);
 		option.value = gamename;
 		games.push(option);
 		_webgame.new_settings[gamename] = {};
-		for (var s = 0; s < settings[gamename].length; ++s) {
-			var setting = settings[gamename][s];
+		for (var s = 0; s < _webgame.games[gamename].settings.length; ++s) {
+			var setting = _webgame.games[gamename].settings[s];
 			var tr = table.AddElement('tr');
 			var name = tr.AddElement('td');
 			var value = tr.AddElement('td');
@@ -849,20 +770,93 @@ _webgame.init = function(languages, settings) { // {{{
 			}
 		}
 	}
+	_webgame.select_game();
 	// }}}
+}; // }}}
+
+_webgame.load_game = function(gametype, cb) { // {{{
+	// First load all new javascript, then run remaining code and start m.grl machinery.
+	_webgame.load_cb = cb;
+	current = gametype;
+	window[current] = {};
+	var loading = 0;
+	var load_done = function() {
+		loading -= 1;
+		if (loading > 0)
+			return;
+		// Set up audio system.
+		// _webgame.audio is an object with the audio data for all the files.
+		// _webgame.audio is a flat object. Keys of _webgame.audio are filenames.
+		// audio has members which are functions to call play on _webgame.audio members.
+		// audio is not flat. Subdirectories are separate objects in audio.
+		// Example: _webgame.audio['sfx/bang.wav'] can be played with audio.sfx.bang().
+		// Because the files have not yet been loaded here,
+		// _webgame.audio is filled with filename keys, but values are path lists like ['sfx', 'bang'], not audio data.
+		// audio is not set up yet.
+		_webgame.audio = {};
+		audio = {};
+		var list = _webgame.games[current][webgame.use_3d ? 'load3d' : 'load2d'];
+		if (list.length > 0) {
+			for (var f = 0; f < list.length; ++f) {
+				please.load(list[f]);
+				var ext = list[f].substr(-4);
+				if (ext == '.ogg' || ext == '.wav' || ext == '.mp3')
+					_webgame.audio[list[f]] = list[f].substr(0, list[f].length - 4).split('/');
+			}
+		}
+		else
+			window.dispatchEvent(new CustomEvent('mgrl_media_ready'));
+	};
+	if (webgame.use_3d === null) {
+		if (webgame.args.interface == '2d') {
+			webgame.use_3d = false;
+			_webgame.force_2d = true;
+		}
+		else
+			webgame.use_3d = _webgame.games[current].use_3d;
+	}
+	if (!_webgame.loaded[current]) {
+		if (_webgame.firstgame == true) {
+			_webgame.firstgame = false;
+			if (webgame.use_3d)
+				please.gl.set_context('canvas');
+			else
+				please.dom.set_context('canvas');
+		}
+		var paths = ['img', 'jta', 'gani', 'audio', 'glsl', 'text'];
+		for (var i = 0; i < paths.length; ++i)
+			please.set_search_path(paths[i], 'games/' + current + '/' + paths[i] + (webgame.use_3d ? '-3d' : '-2d'));
+		_webgame.loaded[current] = true;
+		var head = document.getElementsByTagName('head')[0];
+		for (var s = 0; s < _webgame.games[current].script.length; ++s) {
+			loading += 1;
+			var script = head.AddElement('script');
+			script.AddEvent('load', load_done);
+			script.src = _webgame.games[current].script[s];
+		}
+		for (var s = 0; s < _webgame.games[current].style.length; ++s) {
+			loading += 1;
+			var link = head.AddElement('link');
+			link.AddEvent('load', load_done);
+			link.rel = 'stylesheet';
+			link.href = _webgame.games[current].style[s];
+		}
+	}
+	if (loading == 0)
+		load_done();
 }; // }}}
 
 _webgame.end = function(result) { // {{{
 	dbg('Game ended', result);
-	if (window.end !== undefined)
-		window.end(result);
+	if (window[current].end !== undefined)
+		window[current].end(result);
 	else
 		show_chat(null, _('Game ended. Result: $1')(result));
 }; // }}}
 
 _webgame.server_reply = function(code) { // {{{
-	if (window.reply !== undefined)
-		window.reply(code);
+	if (window[current].reply !== undefined)
+		window[current].reply(code);
 	else if (code !== null) {
 		var reply;
 		if (code.constructor === Array)
@@ -874,6 +868,14 @@ _webgame.server_reply = function(code) { // {{{
 }; // }}}
 
 // UI.
+_webgame.playercolor = function(num) { // {{{
+	if (window[current].playercolor !== undefined)
+		return window[current].playercolor(num);
+	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
+	num %= colors.length;
+	return colors[num];
+} // }}}
+
 _webgame.resize_chat = function(event) { // {{{
 	document.AddEvent('mouseup', up).AddEvent('mousemove', move);
 	var x = event.clientX;
@@ -895,7 +897,7 @@ _webgame.resize_chat = function(event) { // {{{
 }; // }}}
 
 _webgame.resize_window = function(force) { // {{{
-	if (_webgame.mainscreen === undefined)
+	if (!_webgame.media_ready)
 		return;
 	var size = [_webgame.mainscreen.clientWidth, _webgame.mainscreen.clientHeight];
 	if (size[0] == 0 || size[1] == 0)
@@ -953,8 +955,8 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 	please.dom.context.fill();
 	if (window.camera !== undefined)
 		please.dom.context.translate(-window.camera.location_x, -window.camera.location_y);
-	if (window.update_canvas !== undefined && !webgame.use_3d)
-		window.update_canvas(please.dom.context);
+	if (window[current].update_canvas !== undefined && !webgame.use_3d)
+		window[current].update_canvas(please.dom.context);
 }); // }}}
 
 _webgame.set_language = function(language) { // {{{
@@ -977,13 +979,12 @@ _webgame.select_language = function() { // {{{
 	if (Public === undefined || Public.name === undefined)
 		return;
 	if (Public.name == '') {
-		if (window.title_update !== undefined)
-			window.title_update();
+		// Don't do custom updates for title screen.
 	}
-	else if (window.text_update !== undefined)
-		window.text_update();
-	else if (window.update !== undefined)
-		window.update();
+	else if (window[current].text_update !== undefined)
+		window[current].text_update();
+	else if (window[current].update !== undefined)
+		window[current].update();
 }; // }}}
 
 _webgame.chat_event = function(event) { // {{{
@@ -1000,14 +1001,20 @@ _webgame.change_name = function() { // {{{
 	game('webgame', 'name', name);
 }; // }}}
 
+_webgame.change_gameselect = function() { // {{{
+	var gameselect = document.getElementById('gameselect');
+	var gamename = gameselect.options[gameselect.selectedIndex].value;
+	_webgame.select_game();
+}; // }}}
+
 // Commands triggered from buttons on website.
 _webgame.title_join = function() { // {{{
-	var which = webgame.title_select.options[webgame.title_select.selectedIndex].value;
+	var which = _webgame.title_select.options[_webgame.title_select.selectedIndex].value;
 	game('join', which);
 }; // }}}
 
 _webgame.title_view = function() { // {{{
-	var which = webgame.title_select.options[webgame.title_select.selectedIndex].value;
+	var which = _webgame.title_select.options[_webgame.title_select.selectedIndex].value;
 	game('view', which);
 }; // }}}
 
@@ -1038,7 +1045,7 @@ _webgame.finish = function(name, args) { // {{{
 		document.title = _webgame.gametitle;
 		_webgame.game.AddClass('hidden');
 		// Clean up old game.
-		if (oldname != '' && window.end_game !== undefined) {
+		if (oldname != '' && window[current].end_game !== undefined) {
 			for (var key in _webgame.ui) {
 				var list = _webgame.ui[key];
 				for (var num = 0; num < list.length; ++num) {
@@ -1051,7 +1058,7 @@ _webgame.finish = function(name, args) { // {{{
 				}
 			}
 			_webgame.ui = {};
-			window.end_game();
+			window[current].end_game();
 		}
 		// Show title screen.
 		var games = [];
@@ -1063,38 +1070,56 @@ _webgame.finish = function(name, args) { // {{{
 		}
 		// Remove titles that aren't in the list.
 		var new_list = [];	// Remeber items that should remain in the list.
-		for (var g = 0; g < webgame.title_gamelist.length; ++g) {
+		for (var g = 0; g < _webgame.title_gamelist.length; ++g) {
 			// Put each game that is in both old and remote lists also in the new list. Omit the rest.
 			for (var n = 0; n < games.length; ++n) {
-				if (games[n][0] == webgame.title_gamelist[g][0]) {
-					new_list.push(webgame.title_gamelist[g]);
+				if (games[n][0] == _webgame.title_gamelist[g][0]) {
+					new_list.push(_webgame.title_gamelist[g]);
 					break;
 				}
 			}
 		}
 		// Add titles that are in the list and remove the old ones from the Select element.
-		var current = 0;
-		webgame.title_gamelist = [];
+		var current_item = 0;
+		_webgame.title_gamelist = [];
 		for (var n = 0; n < games.length; ++n) {
 			// Remove games that are not in the new list from the selection.
-			while (current < new_list.length && n < webgame.title_select.options.length && new_list[current][0] != webgame.title_select.options[n].value)
-				webgame.title_select.removeChild(webgame.title_select.options[n]);
+			while (current_item < new_list.length && n < _webgame.title_select.options.length && new_list[current_item][0] != _webgame.title_select.options[n].value)
+				_webgame.title_select.removeChild(_webgame.title_select.options[n]);
 			// Add new games that aren't in the selection yet.
-			if (current < new_list.length && games[n][0] == new_list[current][0]) {
-				webgame.title_gamelist.push(new_list[current]);
+			if (current_item < new_list.length && games[n][0] == new_list[current_item][0]) {
+				_webgame.title_gamelist.push(new_list[current_item]);
 				continue;
 			}
 			// Add games that were already in the selection.
-			webgame.title_gamelist.push([games[n][0], title_make_option(webgame.title_select, games[n], n)]);
+			var title_option = Create('option');
+			title_option.value = games[n][0];
+			title_option.players = games[n][1];
+			if (n >= _webgame.title_select.options.length) {
+				_webgame.title_select.appendChild(title_option);
+			}
+			else {
+				_webgame.title_select.insertBefore(title_option, _webgame.title_select.options[n]);
+			}
+			title_option.update_players = function() {
+				var num = 0;
+				for (var p = 0; p < this.players.length; ++p) {
+					if (this.players[p] !== null)
+						num += 1;
+				}
+				this.ClearAll().AddText(this.value + ' (' + num + '/' + this.players.length + ')');
+			};
+			_webgame.title_gamelist.push([games[n][0], title_option]);
+			current_item += 1;
 		}
 		// Remove games that have not been handled at the end of the list.
-		while (webgame.title_select.options.length > n)
-			webgame.title_select.removeChild(webgame.title_select.options[n]);
+		while (_webgame.title_select.options.length > n)
+			_webgame.title_select.removeChild(_webgame.title_select.options[n]);
 		// Update all game info.
-		for (var n = 0; n < webgame.title_gamelist.length; ++n)
-			webgame.title_gamelist[n][1].update_players();
+		for (var n = 0; n < _webgame.title_gamelist.length; ++n)
+			_webgame.title_gamelist[n][1].update_players();
 		// Hide selection if it is empty.
-		if (webgame.title_gamelist.length == 0)
+		if (_webgame.title_gamelist.length == 0)
 			_webgame.title_selection.AddClass('hidden');
 		else
 			_webgame.title_selection.RemoveClass('hidden');
@@ -1102,164 +1127,172 @@ _webgame.finish = function(name, args) { // {{{
 		_webgame.titlescreen.RemoveClass('hidden');
 		_webgame.mainscreen.AddClass('hidden');
 		_webgame.footer.AddClass('hidden');
-		please.renderer.overlay.AddClass('hidden');
-		if (window.title_update !== undefined)
-			window.title_update();
+		if (please.renderer.overlay !== null)
+			please.renderer.overlay.AddClass('hidden');
 		return;
+	}
+	var finish_update = function() {
+		if (Public.demo)
+			_webgame.body.AddClass('demo');
+		else
+			_webgame.body.RemoveClass('demo');
+		if (Public.owner === null) {
+			_webgame.owner.AddClass('hidden');
+			_webgame.noowner.RemoveClass('hidden');
+			if (my_num !== null)
+				_webgame.claim.RemoveClass('hidden');
+			else
+				_webgame.claim.AddClass('hidden');
+			_webgame.release.AddClass('hidden');
+		}
+		else {
+			_webgame.owner.RemoveClass('hidden').ClearAll().AddText(Public.players[Public.owner].name);
+			_webgame.noowner.AddClass('hidden');
+			_webgame.claim.AddClass('hidden');
+			if (Public.owner == my_num)
+				_webgame.release.RemoveClass('hidden');
+			else
+				_webgame.release.AddClass('hidden');
+		}
+		// Update players list.
+		while (_webgame.playerrows.length > Public.players.length)
+			_webgame.players.removeChild(_webgame.playerrows.pop().tr);
+		while (_webgame.playerrows.length < Public.players.length) {
+			var num = _webgame.playerrows.length;
+			var tr = _webgame.players.AddElement('tr');
+			var icon = tr.AddElement('td').AddElement('div', 'icon');
+			icon.style.background = _webgame.playercolor(num);
+			var name = tr.AddElement('td');
+			var kick = tr.AddElement('td', 'kick');
+			var kickbutton = kick.AddElement('button').AddText(_('Kick'));
+			kickbutton.type = 'button';
+			kickbutton.num = num;
+			kickbutton.AddEvent('click', function() { game('webgame', 'kick', Public.players[this.num].name); });
+			var swap = tr.AddElement('td', 'swap');
+			var swapbutton = swap.AddElement('button').AddText(_('Swap'));
+			swapbutton.type = 'button';
+			swapbutton.num = num;
+			swapbutton.AddEvent('click', function() { game('webgame', 'swap', this.num); });
+			_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kickbutton, swap: swapbutton});
+		}
+		for (var i = 0; i < _webgame.playerrows.length; ++i) {
+			var p = _webgame.playerrows[i];
+			var name = Public.players[i].name;
+			if (p.nametext !== name) {
+				p.name.ClearAll().AddText(name === null ? _('(not connected)') : name);
+				p.nametext = name;
+			}
+			if (my_num !== null && Public.owner == my_num && p.nametext !== null && i != my_num)
+				p.kick.RemoveClass('hidden');
+			else
+				p.kick.AddClass('hidden');
+			if (my_num !== null && i != my_num && (p.nametext === null || Public.owner == my_num))
+				p.swap.RemoveClass('hidden');
+			else
+				p.swap.AddClass('hidden');
+		}
+		// Update viewers list.
+		if (Public.viewers.length == 0)
+			_webgame.viewersdiv.AddClass('hidden');
+		else
+			_webgame.viewersdiv.RemoveClass('hidden');
+		while (_webgame.viewerrows.length > Public.viewers.length)
+			_webgame.viewers.removeChild(_webgame.viewerrows.pop().tr);
+		while (_webgame.viewerrows.length < Public.viewers.length) {
+			var num = _webgame.viewerrows.length;
+			var tr = _webgame.viewers.AddElement('tr');
+			var icon = tr.AddElement('td').AddElement('div', 'icon');
+			icon.style.background = 'black';
+			var name = tr.AddElement('td');
+			var kick = tr.AddElement('td', 'kick');
+			var kickbutton = kick.AddElement('button').AddText(_('Kick'));
+			kickbutton.type = 'button';
+			kickbutton.num = num;
+			kickbutton.AddEvent('click', function() { game('webgame', 'kick', Public.viewers[this.num].name); });
+			_webgame.viewerrows.push({tr: tr, nametext: undefined, name: name, kick: kickbutton});
+		}
+		for (var i = 0; i < _webgame.viewerrows.length; ++i) {
+			var p = _webgame.viewerrows[i];
+			var name = Public.viewers[i].name;
+			if (p.nametext !== name) {
+				p.name.ClearAll().AddText(name);
+				p.nametext = name;
+			}
+			if (my_num !== null && Public.owner == my_num)
+				p.kick.RemoveClass('hidden');
+			else
+				p.kick.AddClass('hidden');
+		}
+		// Check watch events.
+		// Fire them in a separate loop, to avoid unexpected behavior when the watch list is changed from a callback.
+		var fire = [];
+		for (var w = 0; w < _webgame.watchlist.length; ++w) {
+			var watch_path = _webgame.watchlist[w][0];
+			var obj = (watch_path[0] == 'Public' ? transaction.Public : transaction.Private);
+			var current_top = (watch_path[0] == 'Public' ? Public : Private);
+			outer: for (var c = 0; c < obj[1].length; ++c) {
+				var changed = obj[1][c];
+				for (var i = 0; i < changed.length && i < watch_path.length - 1; ++i) {
+					if (watch_path[i + 1] != changed[i]) {
+						continue outer;
+					}
+				}
+				// This path has been matched. Fire the watch event.
+				var old_value = obj[0];
+				var new_value = current_top;
+				for (var i = 1; i < watch_path.length; ++i) {
+					if (old_value !== undefined)
+						old_value = old_value[watch_path[i]];
+					if (new_value !== undefined)
+						new_value = new_value[watch_path[i]];
+				}
+				fire.push([_webgame.watchlist[w][1], _webgame.deepcopy(old_value), _webgame.deepcopy(new_value)]);
+				break;
+			}
+		}
+		// Fire watch events.
+		for (var w = 0; w < fire.length; ++w) {
+			var cb = fire[w][0];
+			var old_value = watch[w][1];
+			var new_value = watch[w][2];
+			cb(new_value, old_value, args);
+		}
+		if (name !== undefined && name !== null && window[current]['update_' + name] !== undefined)
+			window[current]['update_' + name](args);
+		if (window[current].ui !== undefined)
+			_webgame.update_ui();
+		if (window[current].update !== undefined) {
+			if (args === null || args === undefined)
+				window[current].update(name, args);
+			else {
+				args.splice(0, 0, name);
+				window[current].update.apply(window[current], args);
+			}
+		}
 	}
 	if (oldname == '') {
 		// Hide the titlescreen.
 		_webgame.titlescreen.AddClass('hidden');
 		_webgame.mainscreen.RemoveClass('hidden');
 		_webgame.footer.RemoveClass('hidden');
-		please.renderer.overlay.RemoveClass('hidden');
-		_webgame.game.RemoveClass('hidden');
-		document.title = _webgame.gametitle + ' - ' + Public.name;
-		document.getElementById('gamename').ClearAll().AddText(Public.name);
-		if (window.camera !== undefined)
-			_webgame.resize_window();
-		if (window.update_canvas !== undefined && !webgame.use_3d)
-			window.update_canvas(please.dom.context);
-		if (window.new_game !== undefined)
-			window.new_game();
+		_webgame.load_game(Public.type, function() {
+			if (window[current].viewport !== undefined)
+				webgame.viewport = window[current].viewport;
+			please.renderer.overlay.RemoveClass('hidden');
+			_webgame.game.RemoveClass('hidden');
+			document.title = Public.name + '-' + Public.type;
+			document.getElementById('gamename').ClearAll().AddText(Public.name);
+			if (window.camera !== undefined)
+				_webgame.resize_window();
+			if (window[current].update_canvas !== undefined && !webgame.use_3d)
+				window[current].update_canvas(please.dom.context);
+			if (window[current].new_game !== undefined)
+				window[current].new_game();
+			finish_update();
+		});
 	}
-	if (Public.demo)
-		_webgame.body.AddClass('demo');
 	else
-		_webgame.body.RemoveClass('demo');
-	if (Public.owner === null) {
-		_webgame.owner.AddClass('hidden');
-		_webgame.noowner.RemoveClass('hidden');
-		if (my_num !== null)
-			_webgame.claim.RemoveClass('hidden');
-		else
-			_webgame.claim.AddClass('hidden');
-		_webgame.release.AddClass('hidden');
-	}
-	else {
-		_webgame.owner.RemoveClass('hidden').ClearAll().AddText(Public.players[Public.owner].name);
-		_webgame.noowner.AddClass('hidden');
-		_webgame.claim.AddClass('hidden');
-		if (Public.owner == my_num)
-			_webgame.release.RemoveClass('hidden');
-		else
-			_webgame.release.AddClass('hidden');
-	}
-	// Update players list.
-	while (_webgame.playerrows.length > Public.players.length)
-		_webgame.players.removeChild(_webgame.playerrows.pop().tr);
-	while (_webgame.playerrows.length < Public.players.length) {
-		var num = _webgame.playerrows.length;
-		var tr = _webgame.players.AddElement('tr');
-		var icon = tr.AddElement('td').AddElement('div', 'icon');
-		icon.style.background = playercolor(num);
-		var name = tr.AddElement('td');
-		var kick = tr.AddElement('td', 'kick');
-		var kickbutton = kick.AddElement('button').AddText(_('Kick'));
-		kickbutton.type = 'button';
-		kickbutton.num = num;
-		kickbutton.AddEvent('click', function() { game('webgame', 'kick', Public.players[this.num].name); });
-		var swap = tr.AddElement('td', 'swap');
-		var swapbutton = swap.AddElement('button').AddText(_('Swap'));
-		swapbutton.type = 'button';
-		swapbutton.num = num;
-		swapbutton.AddEvent('click', function() { game('webgame', 'swap', this.num); });
-		_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kickbutton, swap: swapbutton});
-	}
-	for (var i = 0; i < _webgame.playerrows.length; ++i) {
-		var p = _webgame.playerrows[i];
-		var name = Public.players[i].name;
-		if (p.nametext !== name) {
-			p.name.ClearAll().AddText(name === null ? _('(not connected)') : name);
-			p.nametext = name;
-		}
-		if (my_num !== null && Public.owner == my_num && p.nametext !== null && i != my_num)
-			p.kick.RemoveClass('hidden');
-		else
-			p.kick.AddClass('hidden');
-		if (my_num !== null && i != my_num && (p.nametext === null || Public.owner == my_num))
-			p.swap.RemoveClass('hidden');
-		else
-			p.swap.AddClass('hidden');
-	}
-	// Update viewers list.
-	if (Public.viewers.length == 0)
-		_webgame.viewersdiv.AddClass('hidden');
-	else
-		_webgame.viewersdiv.RemoveClass('hidden');
-	while (_webgame.viewerrows.length > Public.viewers.length)
-		_webgame.viewers.removeChild(_webgame.viewerrows.pop().tr);
-	while (_webgame.viewerrows.length < Public.viewers.length) {
-		var num = _webgame.viewerrows.length;
-		var tr = _webgame.viewers.AddElement('tr');
-		var icon = tr.AddElement('td').AddElement('div', 'icon');
-		icon.style.background = 'black';
-		var name = tr.AddElement('td');
-		var kick = tr.AddElement('td', 'kick');
-		var kickbutton = kick.AddElement('button').AddText(_('Kick'));
-		kickbutton.type = 'button';
-		kickbutton.num = num;
-		kickbutton.AddEvent('click', function() { game('webgame', 'kick', Public.viewers[this.num].name); });
-		_webgame.viewerrows.push({tr: tr, nametext: undefined, name: name, kick: kickbutton});
-	}
-	for (var i = 0; i < _webgame.viewerrows.length; ++i) {
-		var p = _webgame.viewerrows[i];
-		var name = Public.viewers[i].name;
-		if (p.nametext !== name) {
-			p.name.ClearAll().AddText(name);
-			p.nametext = name;
-		}
-		if (my_num !== null && Public.owner == my_num)
-			p.kick.RemoveClass('hidden');
-		else
-			p.kick.AddClass('hidden');
-	}
-	// Check watch events.
-	// Fire them in a separate loop, to avoid unexpected behavior when the watch list is changed from a callback.
-	var fire = [];
-	for (var w = 0; w < _webgame.watchlist.length; ++w) {
-		var watch_path = _webgame.watchlist[w][0];
-		var obj = (watch_path[0] == 'Public' ? transaction.Public : transaction.Private);
-		var current = (watch_path[0] == 'Public' ? Public : Private);
-		outer: for (var c = 0; c < obj[1].length; ++c) {
-			var changed = obj[1][c];
-			for (var i = 0; i < changed.length && i < watch_path.length - 1; ++i) {
-				if (watch_path[i + 1] != changed[i]) {
-					continue outer;
-				}
-			}
-			// This path has been matched. Fire the watch event.
-			var old_value = obj[0];
-			var new_value = current;
-			for (var i = 1; i < watch_path.length; ++i) {
-				if (old_value !== undefined)
-					old_value = old_value[watch_path[i]];
-				if (new_value !== undefined)
-					new_value = new_value[watch_path[i]];
-			}
-			fire.push([_webgame.watchlist[w][1], _webgame.deepcopy(old_value), _webgame.deepcopy(new_value)]);
-			break;
-		}
-	}
-	// Fire watch events.
-	for (var w = 0; w < fire.length; ++w) {
-		var cb = fire[w][0];
-		var old_value = watch[w][1];
-		var new_value = watch[w][2];
-		cb(new_value, old_value, args);
-	}
-	if (name !== undefined && name !== null && window['update_' + name] !== undefined)
-		window['update_' + name](args);
-	if (window.ui !== undefined)
-		_webgame.update_ui();
-	if (window.update !== undefined) {
-		if (args === null || args === undefined)
-			window.update(name, args);
-		else {
-			args.splice(0, 0, name);
-			window.update.apply(window, args);
-		}
-	}
+		finish_update();
 }; // }}}
 
 _webgame.deepcopy = function(obj) { // {{{
@@ -1349,8 +1382,8 @@ _webgame.update_ui = function() { // {{{
 			base_target.push({});
 		sources.push({key: pathstr, source: base_src, target: base_target[0], idx: _webgame.deepcopy(idx)});
 	};
-	for (var key in window.ui) {
-		var obj = window.ui[key];
+	for (var key in window[current].ui) {
+		var obj = window[current].ui[key];
 		var path = key.split('.');
 		var base;
 		var pos = 1;
@@ -1392,7 +1425,7 @@ _webgame.update_ui = function() { // {{{
 
 _webgame.handle_ui = function(key, data) { // {{{
 	// data is {source: object, target: [{node}], idx: array of int}.
-	var obj = window.ui[key];
+	var obj = window[current].ui[key];
 	var get_value = function(attr, raw) {
 		var target;
 		var args = [data.source].concat(data.idx);
@@ -1456,11 +1489,11 @@ _webgame.handle_ui = function(key, data) { // {{{
 			}
 			return loc;
 		}
-		var current = (data.target.node === undefined ? [0, 0, 0] : data.target.node.location);
+		var current_pos = (data.target.node === undefined ? [0, 0, 0] : data.target.node.location);
 		var loc = compute_location();
 		var move_needed = false;
 		for (var i = 0; i < 3; ++i) {
-			if (loc[i] != current[i])
+			if (loc[i] != current_pos[i])
 				move_needed = true;
 		}
 		// }}}
@@ -1531,7 +1564,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 				}
 				var image = get_value('image');
 				if (image !== undefined && image !== null)
-					target.div.style.backgroundImage = 'url(webgame/img/' + image + ')';
+					target.div.style.backgroundImage = 'url(games/' + Public.type + '/img-' + (webgame.use_3d ? '3' : '2') + 'd/' + image + ')';
 			}
 			data.target.node.tag = tag;
 			var visible = get_value('visible');
