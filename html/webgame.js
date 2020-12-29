@@ -597,6 +597,7 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	if (window[current].init !== undefined) window[current].init();
 	if (_webgame.load_cb)
 		_webgame.load_cb();
+	_webgame.server.unlock();
 })); // }}}
 
 // System commands.
@@ -607,7 +608,7 @@ _webgame.id = function(name, num) { // {{{
 }; // }}}
 
 _webgame.init = function(languages, settings) { // {{{
-	console.info(languages, settings);
+	//console.info(languages, settings);
 	_webgame.games = settings;
 	_webgame.gamelist = [];
 	for (var g in _webgame.games)
@@ -696,7 +697,7 @@ _webgame.init = function(languages, settings) { // {{{
 	} // }}}
 	for (var g = 0; g < _webgame.gamelist.length; ++g) {
 		var game = _webgame.games[_webgame.gamelist[g]];
-		console.info(game.name);
+		//console.info(game.name);
 		select.AddElement('option').AddText(game.name);
 	}
 	var radiocount = 0;
@@ -1275,6 +1276,7 @@ _webgame.finish = function(name, args) { // {{{
 		_webgame.titlescreen.AddClass('hidden');
 		_webgame.mainscreen.RemoveClass('hidden');
 		_webgame.footer.RemoveClass('hidden');
+		_webgame.server.lock();
 		_webgame.load_game(Public.type, function() {
 			if (window[current].viewport !== undefined)
 				webgame.viewport = window[current].viewport;
@@ -1602,7 +1604,6 @@ _webgame.handle_ui = function(key, data) { // {{{
 							return;
 						node.dispatch('click', event);
 					});
-					console.info('div created');
 					return node;
 				}
 			};
