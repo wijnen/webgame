@@ -1,5 +1,6 @@
 from random import choice
 
+name = 'Tutorial 6: Flip'
 num_players = 1
 w, h = 3, 3
 size = w * h

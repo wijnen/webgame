@@ -1,3 +1,4 @@
+name = 'Tutorial 2: Stop Motion Animation'
 num_players = 1
 
 # This is a small stop-motion animation.

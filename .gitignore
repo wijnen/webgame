@@ -1,9 +1,8 @@
-html/gl-matrix.js
-html/mgrl.js
-example/quarto/__pycache__/
-example/quarto/webgame.py
+/html/gl-matrix.js
+/html/mgrl.js
+/html/builders.js
+/html/rpc.js
+/tutorial/html/
 __pycache__/
-po/*~
-po.js/*~
-po/webgame.pot
-po.js/webgame.pot
+/games
+/tutorial/games/html/

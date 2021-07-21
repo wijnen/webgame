@@ -1,5 +1,6 @@
 # Public.board = {'i.j': [piece]}, with piece player number or -1 for a red ring.
 
+name = 'Tutorial 10: Dvonn'
 num_players = 2
 
 class Game:

@@ -1,3 +1,4 @@
+name = 'Tutorial 5: Visual Novel'
 num_players = 1
 
 # Choose a data structure that fits your needs.

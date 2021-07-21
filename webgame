@@ -433,17 +433,18 @@ def broadcast_shared(target, path, value, group = None): # {{{
 # }}}
 
 # Read info for all games. {{{
-gamedirs = fhs.read_data('games', dir = True, multiple = True)
+gamedirs = set(os.path.realpath(x) for x in fhs.read_data('games', dir = True, multiple = True))
 log('game dirs: %s' % repr(gamedirs))
 files = []
 for d in gamedirs:
 	for f in os.listdir(d):
-		log('checking %s' % f)
+		#log('checking %s' % f)
 		name = os.path.join(d, f)
 		if not os.path.exists(os.path.join(name, f + os.extsep + 'py')) or not os.path.exists(os.path.join(name, 'html')):
 			continue
 		log('Found game: %s' % name)
 		files.append((name, f))
+files.sort();
 games = {}
 for gamedir in files:
 	name = gamedir[1]
@@ -522,7 +523,6 @@ for gamedir in files:
 	# }}}
 
 	_settings[name]['name'] = name if not hasattr(games[name], 'name') else games[name].name
-	print('name', games[name].name, file = sys.stderr)
 	_settings[name]['load3d'] = [x[0] for x in loader[True]]
 	_settings[name]['load2d'] = [x[0] for x in loader[False]]
 	_settings[name]['use_3d'] = use3d

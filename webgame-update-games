@@ -1,0 +1,100 @@
+#!/usr/bin/python3
+
+'''Update all games.
+
+Actions:
+- Link html/ directory to central location (same subpath as games/ directory for each game).
+- Update translations.
+
+Paths:
+<datapath>/
+	html -> accessible from web server
+		games -> link to ../games/html
+	games -> possibly link
+		html -> automatically filled
+		<gamename>/ -> game directory
+			html -> linked to ../html/<gamename>
+			<gamename>.py
+'''
+
+import os
+import fhs
+from network import log
+config = fhs.init(help = 'Update all webgame games', version = '0.1', contact = 'Bas Wijnen <wijnen@debian.org>', packagename = 'webgame', game = True)
+
+# Find all games.
+games = fhs.read_data('games', dir = True, multiple = True)
+log('Found possible games locations: ' + '; '.join(games))
+
+for gamesdir in games:
+	# Create html directory, if it does not exist yet.
+	htmldir = os.path.join(gamesdir, 'html')
+	if not os.path.isdir(htmldir):
+		try:
+			os.mkdir(htmldir)
+		except PermissionError:
+			log('insufficient permissions to update ' + gamesdir + '; skipping')
+			continue
+
+	# Create link to htmldir from ../html/games
+	targetdir = os.path.join(os.path.dirname(gamesdir), 'html')
+	if not os.path.exists(targetdir):
+		try:
+			os.mkdir(targetdir)
+		except PermissionError:
+			log('insufficient permissions to create html link for ' + gamesdir + '; skipping')
+			continue
+	target = os.path.join(targetdir, 'games')
+	if not os.path.exists(target):
+		try:
+			os.symlink(os.path.join(os.pardir, 'games', 'html'), target)
+		except PermissionError:
+			log('insufficient permissions to update html link for ' + gamesdir + '; skipping')
+			continue
+
+	# Remove all links in htmldir; any valid links will be recreated.
+	# Doing it this way makes sure that a game can be removed by removing the game directory, and the link will be cleaned automatically.
+	for link in os.listdir(htmldir):
+		if link.startswith('.'):
+			# Never touch hidden files.
+			continue
+		target = os.path.join(htmldir, link)
+		if os.path.islink(target):
+			try:
+				os.unlink(target)
+			except PermissionError:
+				log('insufficient permissions to remove ' + target + '; ignored')
+
+	# Handle all game candidates in this directory.
+	for game in os.listdir(gamesdir):
+		# Ignore hidden files and the special 'html' directory.
+		if game.startswith('.') or game == 'html':
+			#log('skipping ' + game + ': hidden or special file')
+			continue
+
+		if not os.path.isdir(os.path.join(gamesdir, game)):
+			# Not a directory; ignore without message.
+			#log('skipping ' + game + ': not a directory')
+			continue
+
+		if not os.path.isfile(os.path.join(gamesdir, game, game + os.extsep + 'py')):
+			log('skipping ' + game + ': no game file (needed: ' + game + os.extsep + 'py)')
+			continue
+
+		# Link html/ directory.
+		if not os.path.isdir(os.path.join(gamesdir, game, 'html')):
+			log('skipping ' + game + ': no html directory')
+			continue
+
+		target = os.path.join(gamesdir, 'html', game)
+		if not os.path.exists(target):
+			log('linking html directory for ' + game + ' in ' + gamesdir)
+			try:
+				os.symlink(os.path.join(os.pardir, game, 'html'), target)
+			except PermissionError:
+				log('skipping ' + game + ': insufficient permissions')
+		else:
+			log('skipping ' + game + ': already exists and is not a symlink')
+
+		# Update translations.
+		# TODO.

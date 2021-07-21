@@ -11,6 +11,8 @@ made with the python-webgame module.  This is a simple example that only shows
 the basics.
 '''
 
+name = 'Tutorial 7: Quarto'
+
 # The module reads some settings from global variables.  This defines that
 # every game is played with two players.
 num_players = 2

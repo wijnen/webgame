@@ -5,6 +5,8 @@
 
 import random
 
+name = 'Tutorial 9: Take 5'
+
 num_players = 2, 10
 
 num_cards = 10

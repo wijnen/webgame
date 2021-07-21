@@ -14,13 +14,11 @@ cannot play anymore.  Lower is better.
 When the drawing pile is empty, only 1 card is required per turn.
 '''
 
+name = 'Tutorial 8: The Game'
+
 # Instead of a fixed number of players, a range can be given.  The actual
 # number is chosen in the title screen.
 num_players = (1, 5)
-
-# The game name is normally derived from the executable name, but it can be
-# explicitly specified.
-name = 'The Game'
 
 class Game:
 	def run(self):
