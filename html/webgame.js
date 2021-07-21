@@ -600,6 +600,14 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	_webgame.server.unlock();
 })); // }}}
 
+_webgame.loading = function(state) { // {{{
+	var body = document.getElementsByTagName('body')[0]
+	if (state)
+		body.AddClass('loading');
+	else
+		body.RemoveClass('loading');
+}; // }}}
+
 // System commands.
 _webgame.id = function(name, num) { // {{{
 	my_name = name;
@@ -776,6 +784,7 @@ _webgame.init = function(languages, settings) { // {{{
 }; // }}}
 
 _webgame.load_game = function(gametype, cb) { // {{{
+	_webgame.loading(true);
 	// First load all new javascript, then run remaining code and start m.grl machinery.
 	_webgame.load_cb = cb;
 	current = gametype;
@@ -856,7 +865,7 @@ _webgame.end = function(result) { // {{{
 }; // }}}
 
 _webgame.server_reply = function(code) { // {{{
-	if (window[current].reply !== undefined)
+	if (window[current] !== undefined && window[current].reply !== undefined)
 		window[current].reply(code);
 	else if (code !== null) {
 		var reply;
@@ -1130,6 +1139,7 @@ _webgame.finish = function(name, args) { // {{{
 		_webgame.footer.AddClass('hidden');
 		if (please.renderer.overlay !== null)
 			please.renderer.overlay.AddClass('hidden');
+		_webgame.loading(false);
 		return;
 	}
 	var finish_update = function() {
@@ -1291,6 +1301,7 @@ _webgame.finish = function(name, args) { // {{{
 			if (window[current].new_game !== undefined)
 				window[current].new_game();
 			finish_update();
+			_webgame.loading(false);
 		});
 	}
 	else

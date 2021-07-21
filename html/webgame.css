@@ -23,6 +23,19 @@ body {
 	--width: 80%;
 }
 
+#loading {
+	text-align: center;
+	font-size: 400%;
+	position: fixed;
+	top: calc(50vh - .5em);
+	left: 0px;
+	width: 100%;
+	z-index: 2;
+}
+body:not(.loading) #loading {
+	display: none;
+}
+
 #vdiv {
 	position: fixed;
 	background: #444;
