@@ -572,7 +572,19 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 					obj[objname[p]] = {};
 				obj = obj[objname[p]];
 			}
-			_webgame._game[current].files[type][i] = please.access(path);
+			var img = please.access(path);
+
+			// Convert image source to data url.
+			var canvas = Create('canvas');
+			canvas.width = img.naturalWidth;
+			canvas.height = img.naturalHeight;
+			var ctx = canvas.getContext('2d');
+			ctx.drawImage(img, 0, 0);
+			// Create a new img element, otherwise M.Grl's cleanup will be confused.
+			img = Create('img');
+			img.src = canvas.toDataURL('image/png');
+			_webgame._game[current].files[type][i] = img;
+
 			var item = objname[objname.length - 1];
 			var setup_object = function(obj, item, type, idx) {
 				// The purpose of this function is to create a scope for type and idx for each iteration of the for loop.
@@ -596,14 +608,12 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 						}
 					};
 				}
-				else if (type == 'img') {
-					// Return an img html element. Its src can be used by others. TODO: turn it into a data url so the file does not need to be reloaded.
+				else if (type == 'image') {
+					// Return an img html element. Its src can be used by others.
 					obj[item] = function() { return _webgame._game[current].files[type][idx]; };
 				}
 				else {
-					obj[item] = function() {
-						return _webgame._game[current].files[type][idx].instance();
-					};
+					obj[item] = function() { return _webgame._game[current].files[type][idx].instance(); };
 				}
 			};
 			setup_object(obj, item, type, i);
@@ -830,14 +840,14 @@ _webgame.load_game = function(gametype, cb) { // {{{
 		loading -= 1;
 		if (loading > 0)
 			return;
-		// _webgame._game[gametype].files is an object with one array per file type (img, jta, audio, etc).
-		// Each element is [object, path]. The object is an array like ['img', 'outside', 'house'].
+		// _webgame._game[gametype].files is an object with one array per file type (image, jta, audio, etc).
+		// Each element is [object, path]. The object is an array like ['image', 'outside', 'house'].
 		// The path is the filename which can be used with please.access().
 		// When loading is complete, the path is replaced with the result of that call.
 
 		// For each file type, a nested object will be placed in the
 		// game object. For example, the house above will be
-		// accessible as game.img.outside.house
+		// accessible as game.image.outside.house
 		var list = _webgame.games[current][webgame.use_3d ? 'load3d' : 'load2d'];
 		if (list.length > 0) {
 			for (var f = 0; f < list.length; ++f) {

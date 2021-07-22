@@ -479,7 +479,7 @@ for gamedir in files:
 	# Search through directories for all files and sort them into correct data element.
 	result = {}
 	have_3d = {False: False, True: False}
-	for base in ('img', 'jta', 'gani', 'audio', 'text'):
+	for base in ('image', 'jta', 'gani', 'audio', 'text'):
 		queue = [
 			{'name': (), 'dirname': base, 'pathname': base, 'use-3d': None},
 			{'name': (), 'dirname': base + '-2d', 'pathname': base + '-2d', 'use-3d': False},
@@ -489,7 +489,6 @@ for gamedir in files:
 		while len(queue) > 0:
 			q = queue.pop(0)
 			dirname = os.path.join(jssrc, q['dirname'])
-			log('game: %s; q: %s; dirname: %s' % (name, q, dirname))
 			if not os.path.isdir(dirname):
 				continue
 			files = [f for f in os.listdir(dirname) if os.path.splitext(f)[1] not in fhs.get_config()['forbidden-exts']]
@@ -509,7 +508,6 @@ for gamedir in files:
 					base_f = os.path.splitext(f)[0]
 					pathname = q['pathname'] + '/' + f
 					objname = q['name'] + (base_f[0:len(base_f) - len(required_suffix)],)
-					log('f %s objname %s base %s suf %s' % (f, objname, base_f, required_suffix))
 					new_use_3d = q['use-3d'] if use_3d is None else use_3d
 					# Mark have_3d early, so an empty directory can be used to force a use-3d value.
 					if new_use_3d is not None:
@@ -531,7 +529,6 @@ for gamedir in files:
 						continue
 					# new_use_3d is True or False; replace appropriate element.
 					result[base][objname][int(new_use_3d)] = {'filename': filename, 'pathname': pathname, 'use-3d': new_use_3d}
-	log(result)
 	loader = {False: [], True: []}
 	for base in result:
 		for objname in result[base]:
