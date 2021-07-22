@@ -1,4 +1,4 @@
-name = 'Tutorial 1: Static Game'
+name = 'Tutorial 1: Non-Game with static scene'
 num_players = 1
 
 class Game:

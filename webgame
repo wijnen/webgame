@@ -467,47 +467,82 @@ for gamedir in files:
 	if not hasattr(games[name], 'settings'):
 		_settings[name] = {'settings': []}
 	else:
+		# The game provides its own settings; use them as defaults, then add settings based on files.
 		_settings[name] = {'settings': games[name].settings[:]}
 	# Build lists of loaded files. {{{
+	# These variables all have a 2-D and a 3-D element.
 	loader = [[], []]
 	can = [False, False]
 	targets = [[], []]
 	jssrc = os.path.join(gamedir[0], 'html') # Place where web content can be found by this program.
-	def find(srcbase, prefix, antisuffix, specific): # {{{
-		'''Find files in some directory.
-		srcbase is a directory like <jssrc>/img-2d
-		prefix is the base directory for this subdir search (used for recursive calls).
-		antisuffix is the suffix for files to ignore, like -3d
-		specific is a suffix string to indicate the dimensionality, or None if not specific. It's only passed into the output.
 
-		Returns a list of dicts of {'src': source file, 'link': dest url to be used from javascript, 'specific': specific}
-		'''
-		if not os.path.exists(srcbase):
-			return []
-		files = os.listdir(srcbase)
-		subdirs = [x for x in files if os.path.isdir(os.path.join(srcbase, x))]
-		ret = [{'src': os.path.join(srcbase, x), 'link': prefix + '/' + x if len(prefix) > 0 else x, 'specific': specific} for x in files if not x.startswith('.') and not x in subdirs and not os.path.splitext(x)[0].endswith(antisuffix) and os.path.splitext(x)[1] not in fhs.get_config()['forbidden-exts']]
-		for sd in subdirs:
-			ret.extend(find(os.path.join(srcbase, sd), 'games/' + (prefix + '/' + sd if len(prefix) > 0 else sd), antisuffix, specific))
-		return ret
-	# }}}
+	# Search through directories for all files and sort them into correct data element.
+	result = {}
+	have_3d = {False: False, True: False}
+	for base in ('img', 'jta', 'gani', 'audio', 'text'):
+		queue = [
+			{'name': (), 'dirname': base, 'pathname': base, 'use-3d': None},
+			{'name': (), 'dirname': base + '-2d', 'pathname': base + '-2d', 'use-3d': False},
+			{'name': (), 'dirname': base + '-3d', 'pathname': base + '-3d', 'use-3d': True},
+		]
+		result[base] = {}
+		while len(queue) > 0:
+			q = queue.pop(0)
+			dirname = os.path.join(jssrc, q['dirname'])
+			log('game: %s; q: %s; dirname: %s' % (name, q, dirname))
+			if not os.path.isdir(dirname):
+				continue
+			files = [f for f in os.listdir(dirname) if os.path.splitext(f)[1] not in fhs.get_config()['forbidden-exts']]
+			for required_suffix, forbidden_suffix, use_3d in (('', ('-2d', '-3d'), None), ('-2d', (), True), ('-3d', (), False)):
+				for f in files:
+					if not os.path.splitext(f)[0].endswith(required_suffix):
+						# Wrong suffix for this loop iteration.
+						continue
+					if any(os.path.splitext(f)[0].endswith(x) for x in forbidden_suffix):
+						# Wrong suffix for this loop iteration.
+						continue
+					filename = os.path.join(jssrc, f)
+					if all(x in (True, False) for x in (use_3d, q['use-3d'])) and (use_3d ^ q['use-3d']):
+						# Mix of -3d and -2d suffixes in path can never match anything.
+						log('Warning: File ' + filename + ' ignored, because it contains both -2d and -3d parts')
+						continue
+					base_f = os.path.splitext(f)[0]
+					pathname = q['pathname'] + '/' + f
+					objname = q['name'] + (base_f[0:len(base_f) - len(required_suffix)],)
+					log('f %s objname %s base %s suf %s' % (f, objname, base_f, required_suffix))
+					new_use_3d = q['use-3d'] if use_3d is None else use_3d
+					# Mark have_3d early, so an empty directory can be used to force a use-3d value.
+					if new_use_3d is not None:
+						have_3d[new_use_3d] = True
+					if os.path.isdir(filename):
+						# Add directories to the queue.
+						queue.append({'name': objname, 'dirname': filename, 'pathname': pathname, 'use-3d': new_use_3d})
+						continue
+					# This is a usable file. Add it to the result.
+					if objname not in result[base]:
+						result[base][objname] = [None, None]
+					if new_use_3d is None:
+						# No suffix. Fill both fields, only if they are None.
+						for i in range(2):
+							if result[base][objname][i] is not None:
+								log('Warning: file ' + filename + ' exists with -*d suffix and also without it')
+								continue
+							result[base][objname][i] = {'filename': filename, 'pathname': pathname, 'use-3d': new_use_3d}
+						continue
+					# new_use_3d is True or False; replace appropriate element.
+					result[base][objname][int(new_use_3d)] = {'filename': filename, 'pathname': pathname, 'use-3d': new_use_3d}
+	log(result)
+	loader = {False: [], True: []}
+	for base in result:
+		for objname in result[base]:
+			for t in (False, True):
+				p = result[base][objname][t]
+				if p is not None:
+					loader[t].append({'type': base, 'object': objname, 'path': p['pathname']})
 
-	for suffix, antisuffix, use_3d in (('-2d', '-3d', False), ('-3d', '-2d', True)):
-		for base in ('img', 'jta', 'gani', 'audio', 'text'):
-			suffixtargets = find(os.path.join(jssrc, base + suffix), '', antisuffix, suffix)
-			can[use_3d] = can[use_3d] or os.path.exists(os.path.join(jssrc, base + suffix))
-			targets[use_3d].extend(suffixtargets)
-			targets[use_3d].extend(find(os.path.join(jssrc, base), '', antisuffix, None))
-		if len(targets[use_3d]) > 0:
-			can[use_3d] = can[use_3d] or any(os.path.splitext(x['src'])[0].endswith(suffix) for x in targets[use_3d])
-			loader[use_3d] = [(f['link'], f['specific']) for f in targets[use_3d]]
-			loader[use_3d].sort(key = lambda x: ([None, '-2d', '-3d'].index(x[1]), x[0]))
-		else:
-			loader[use_3d] = []
-
-	if not any(can) or all(can):
-		use3d = True
-	elif can[False]:
+	if not any(have_3d) or all(have_3d):
+		use3d = None
+	elif have_3d[False]:
 		use3d = False
 	else:
 		use3d = True
@@ -523,8 +558,8 @@ for gamedir in files:
 	# }}}
 
 	_settings[name]['name'] = name if not hasattr(games[name], 'name') else games[name].name
-	_settings[name]['load3d'] = [x[0] for x in loader[True]]
-	_settings[name]['load2d'] = [x[0] for x in loader[False]]
+	_settings[name]['load3d'] = loader[True]
+	_settings[name]['load2d'] = loader[False]
 	_settings[name]['use_3d'] = use3d
 	_settings[name]['script'] = scripts
 	_settings[name]['style'] = styles

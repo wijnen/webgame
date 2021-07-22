@@ -1,4 +1,4 @@
-// use strict;
+"use strict";
 // vim: set foldmethod=marker :
 
 // Functions and variables which can be used by user code. {{{
@@ -24,7 +24,7 @@ Object.defineProperty(webgame, "viewport", {
 	}
 });
 
-function game(target) { // {{{
+function server(target) { // {{{
 	var args = [];
 	for (var i = 1; i < arguments.length; ++i)
 		args.push(arguments[i]);
@@ -293,7 +293,7 @@ function color_texture(instance, tname, color) { // {{{
 } // }}}
 
 function send_chat(message) { // {{{
-	game('webgame', 'chat', message);
+	server('webgame', 'chat', message);
 } // }}}
 
 function show_chat(source, message) { // {{{
@@ -338,7 +338,9 @@ var _webgame = { // {{{
 	viewport: [-20, -15, 20, 15],
 	loaded: {},
 	firstgame: true,
-	media_ready: false
+	media_ready: false,
+	game: {},	// User-accesible data; window.game is set to the active game's value from here when its code is running.
+	_game: {}	// internal data
 }; // }}}
 
 // Parse url arguments. {{{
@@ -389,7 +391,7 @@ window.AddEvent('load', function() { // {{{
 	_webgame.body = document.getElementsByTagName('body')[0];
 	_webgame.state = document.getElementById('state');
 	// Set up translations.
-	_translatable = {};
+	window._translatable = {};
 	var elements = document.getElementsByClassName('translate');
 	for (var e = 0; e < elements.length; ++e) {
 		var tag = elements[e].textContent;
@@ -414,10 +416,10 @@ window.AddEvent('load', function() { // {{{
 			for (var a = 1; a < arguments.length; ++a)
 				args.push(arguments[a]);
 			//console.info('calling', name, args);
-			if (window[current][name] === undefined)
+			if (game[name] === undefined)
 				show_chat(null, _('Error: server calls $1, which is undefined')(name))
 			else
-				window[current][name].apply(window[current], args);
+				game[name].apply(game, args);
 		}
 	};
 	_webgame.server = Rpc(messages,
@@ -435,6 +437,7 @@ window.AddEvent('load', function() { // {{{
 window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	_webgame.media_ready = true;
 	if (webgame.use_3d) {
+		// Inject a square 3-D object for generating objects without a model.
 		var square = '{"meta": {"jta_version": [0.1]}, "attributes": [{"vertices": {"position": {"type": "Array", "hint": "Float16Array", "item": 3, "data": "ADgAuAAAALgAOAAAALgAuAAAALgAuAEAADgAOAGAADgAuAGAADgAuAAAADgAOAAAALgAOAAAALgAuAEAALgAOAEAADgAOAGA"}, "tcoords": [{"type": "Array", "hint": "Float16Array", "item": 2, "data": "ADyNBo8GADyNBpEGADyNBo8GADyNBpEGADyNBgA8ADyPBgA8ADyNBgA8ADyPBgA8"}]}, "polygons": {"type": "Array", "hint": "Uint16Array", "item": 1, "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsA"}}], "models": {"Plane": {"parent": null, "extra": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": -0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "smooth_normals": false}, "state": {"world_matrix": {"type": "Array", "hint": "Float16Array", "item": 4, "data": "ADwAAAAAAAAAAAA8AAAAAAAAAAAAPAAAAAAAAAAAADw="}}, "struct": 0, "groups": {"default": {"start": 0, "count": 12}}}}, "packed_data": {}}';
 		please.media.assets['square'] = please.gl.__jta_model(square, 'square');
 	}
@@ -461,6 +464,7 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		graph.add(camera_base);
 		_webgame.update_camera();
 		if (webgame.mouse_navigation) {
+			// TODO: This code still works around a bug that has been fixed. It should be simplified.
 			_webgame.move_event = [null, null];
 			window.AddEvent('mousedown', function(event) {
 				if (event.buttons != 4)
@@ -511,6 +515,7 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 		please.set_viewport(renderer);
 	} // }}}
 	else {
+		// TODO: This code still works around a bug that has been fixed. It should be simplified.
 		window.camera.look_at = function() { return [window.camera.location_x, window.camera.location_y, 0]; };
 		_webgame.update_camera();
 		if (webgame.mouse_navigation) {
@@ -553,48 +558,77 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	}
 	window.camera.activate();
 
-	// Finish setting up audio system.
-	for (var a in _webgame.audio) {
-		var path = _webgame.audio[a];
-		var obj = audio;
-		for (var p = 0; p < path.length - 1; ++p) {
-			if (obj[path[p]] === undefined)
-				obj[path[p]] = {};
-			obj = obj[path[p]];
-		}
-		_webgame.audio[a] = please.access(a);
-		(function(a) {	// This function creates a private copy of a for each iteration.
-			obj[path[path.length - 1]] = function(loop) {
-				_webgame.audio[a].loop = loop === true;
-				if (loop === null)
-					_webgame.audio[a].stop();
-				else if (loop !== false) {
-					_webgame.audio[a].currentTime = 0;
-					_webgame.audio[a].play();
+	// Finish setting up files.
+	console.info('finish loading');
+	for (var type in _webgame._game[current].files) {
+		game[type] = {};
+		console.info('type', type, 'length', _webgame._game[current].files[type].length, 'current', current);
+		for (var i = 0; i < _webgame._game[current].files[type].length; ++i) {
+			var objname = _webgame._game[current].files[type][i][0];
+			var path = _webgame._game[current].files[type][i][1];
+			var obj = game[type];
+			for (var p = 0; p < objname.length - 1; ++p) {
+				if (obj[objname[p]] === undefined)
+					obj[objname[p]] = {};
+				obj = obj[objname[p]];
+			}
+			_webgame._game[current].files[type][i] = please.access(path);
+			var item = objname[objname.length - 1];
+			var setup_object = function(obj, item, type, idx) {
+				// The purpose of this function is to create a scope for type and idx for each iteration of the for loop.
+
+				// Most types call instance() when the object is called. Some have special handling.
+				if (type == 'audio') {
+					// Play (or stop) the audio when calling the object.
+					obj[item] = function(loop) {
+						// If loop is null, stop playing.
+						// If loop is undefined, play the file once.
+						// If loop is true, loop the file.
+						// If loop is false, stop looping, but finish possible current playback.
+						if (loop === null) {
+							_webgame._game[current].files.audio[idx].stop();
+							return;
+						}
+						_webgame._game[current].files.audio[idx].loop = loop === true;
+						if (loop !== false) {
+							_webgame._game[current].files.audio[idx].currentType = 0;
+							_webgame._game[current].files.audio[idx].play();
+						}
+					};
+				}
+				else if (type == 'img') {
+					// Return an img html element. Its src can be used by others. TODO: turn it into a data url so the file does not need to be reloaded.
+					obj[item] = function() { return _webgame._game[current].files[type][idx]; };
+				}
+				else {
+					obj[item] = function() {
+						return _webgame._game[current].files[type][idx].instance();
+					};
 				}
 			};
-		})(a);
+			setup_object(obj, item, type, i);
+		}
 	}
 
 	window.AddEvent('resize', _webgame.resize_window);
 	var events = ['keydown', 'keyup'];
 	for (var e = 0; e < events.length; ++e) {
-		if ((!webgame.use_3d && window[current][events[e] + '2d'] !== undefined) || (webgame.use_3d && window[current][events[e] + '3d'] !== undefined) || window[current][events[e]] !== undefined) {
+		if ((!webgame.use_3d && game[events[e] + '2d'] !== undefined) || (webgame.use_3d && game[events[e] + '3d'] !== undefined) || game[events[e]] !== undefined) {
 			window.AddEvent(events[e], function(event) {
 				if (document.activeElement.tagName == 'INPUT' || document.activeElement.tagName == 'TEXTAREA' || Public === undefined || Public.name === undefined || Public.name == '')
 					return;
-				if (!webgame.use_3d && window[current][event.type + '2d'] !== undefined)
-					return window[current][event.type + '2d'](event);
-				else if (webgame.use_3d && window[current][events[e] + '3d'] !== undefined)
-					return window[current][event.type + '3d'](event);
+				if (!webgame.use_3d && game[event.type + '2d'] !== undefined)
+					return game[event.type + '2d'](event);
+				else if (webgame.use_3d && game[events[e] + '3d'] !== undefined)
+					return game[event.type + '3d'](event);
 				else
-					return window[current][event.type](event);
+					return game[event.type](event);
 			});
 		}
 	}
-	if (!webgame.use_3d && window[current].init2d !== undefined) window[current].init2d();
-	if (webgame.use_3d && window[current].init3d !== undefined) window[current].init3d();
-	if (window[current].init !== undefined) window[current].init();
+	if (!webgame.use_3d && game.init2d !== undefined) game.init2d();
+	if (webgame.use_3d && game.init3d !== undefined) game.init3d();
+	if (game.init !== undefined) game.init();
 	if (_webgame.load_cb)
 		_webgame.load_cb();
 	_webgame.server.unlock();
@@ -788,42 +822,48 @@ _webgame.load_game = function(gametype, cb) { // {{{
 	// First load all new javascript, then run remaining code and start m.grl machinery.
 	_webgame.load_cb = cb;
 	current = gametype;
-	window[current] = {};
+	_webgame.game[current] = {};	// user accessible data.
+	window.game = _webgame.game[current];
+	_webgame._game[current] = {files: {}};	// internal data.
 	var loading = 0;
 	var load_done = function() {
 		loading -= 1;
 		if (loading > 0)
 			return;
-		// Set up audio system.
-		// _webgame.audio is an object with the audio data for all the files.
-		// _webgame.audio is a flat object. Keys of _webgame.audio are filenames.
-		// audio has members which are functions to call play on _webgame.audio members.
-		// audio is not flat. Subdirectories are separate objects in audio.
-		// Example: _webgame.audio['sfx/bang.wav'] can be played with audio.sfx.bang().
-		// Because the files have not yet been loaded here,
-		// _webgame.audio is filled with filename keys, but values are path lists like ['sfx', 'bang'], not audio data.
-		// audio is not set up yet.
-		_webgame.audio = {};
-		audio = {};
+		// _webgame._game[gametype].files is an object with one array per file type (img, jta, audio, etc).
+		// Each element is [object, path]. The object is an array like ['img', 'outside', 'house'].
+		// The path is the filename which can be used with please.access().
+		// When loading is complete, the path is replaced with the result of that call.
+
+		// For each file type, a nested object will be placed in the
+		// game object. For example, the house above will be
+		// accessible as game.img.outside.house
 		var list = _webgame.games[current][webgame.use_3d ? 'load3d' : 'load2d'];
 		if (list.length > 0) {
 			for (var f = 0; f < list.length; ++f) {
-				please.load(list[f]);
-				var ext = list[f].substr(-4);
-				if (ext == '.ogg' || ext == '.wav' || ext == '.mp3')
-					_webgame.audio[list[f]] = list[f].substr(0, list[f].length - 4).split('/');
+				var type = list[f].type;
+				if (_webgame._game[current].files[type] === undefined)
+					_webgame._game[current].files[type] = [];
+				_webgame._game[current].files[type].push([list[f].object, list[f].path]);
+				loading += 1;
+				//console.info('loading', list[f].path);
+				please.load(list[f].path);
 			}
 		}
 		else
 			window.dispatchEvent(new CustomEvent('mgrl_media_ready'));
 	};
 	if (webgame.use_3d === null) {
+		// Both 2-D and 3-D are possible.
 		if (webgame.args.interface == '2d') {
+			// The user requested a 2-D interface, so use that.
 			webgame.use_3d = false;
 			_webgame.force_2d = true;
 		}
-		else
-			webgame.use_3d = _webgame.games[current].use_3d;
+		else {
+			// Use a 3-D interface only if the user didn't refuse it, and the game allows it.
+			webgame.use_3d = _webgame.games[current].use_3d !== false;
+		}
 	}
 	if (!_webgame.loaded[current]) {
 		if (_webgame.firstgame == true) {
@@ -833,17 +873,23 @@ _webgame.load_game = function(gametype, cb) { // {{{
 			else
 				please.dom.set_context('canvas');
 		}
+		_webgame.files = {};
 		var paths = ['img', 'jta', 'gani', 'audio', 'glsl', 'text'];
 		for (var i = 0; i < paths.length; ++i)
-			please.set_search_path(paths[i], 'games/' + current + '/' + paths[i] + (webgame.use_3d ? '-3d' : '-2d'));
+			please.set_search_path(paths[i], 'games/' + current + '/');
 		_webgame.loaded[current] = true;
 		var head = document.getElementsByTagName('head')[0];
-		for (var s = 0; s < _webgame.games[current].script.length; ++s) {
-			loading += 1;
+		var load_script = function(index, scripts) {
+			if (index >= scripts.length) {
+				load_done();
+				return;
+			}
 			var script = head.AddElement('script');
-			script.AddEvent('load', load_done);
-			script.src = _webgame.games[current].script[s];
-		}
+			script.AddEvent('load', function() { load_script(index + 1, scripts); });
+			script.src = scripts[index];
+		};
+		loading += 1;
+		load_script(0, _webgame.games[current].script);
 		for (var s = 0; s < _webgame.games[current].style.length; ++s) {
 			loading += 1;
 			var link = head.AddElement('link');
@@ -858,15 +904,15 @@ _webgame.load_game = function(gametype, cb) { // {{{
 
 _webgame.end = function(result) { // {{{
 	dbg('Game ended', result);
-	if (window[current].end !== undefined)
-		window[current].end(result);
+	if (game.end !== undefined)
+		game.end(result);
 	else
 		show_chat(null, _('Game ended. Result: $1')(result));
 }; // }}}
 
 _webgame.server_reply = function(code) { // {{{
-	if (window[current] !== undefined && window[current].reply !== undefined)
-		window[current].reply(code);
+	if (game !== undefined && game.reply !== undefined)
+		game.reply(code);
 	else if (code !== null) {
 		var reply;
 		if (code.constructor === Array)
@@ -879,8 +925,8 @@ _webgame.server_reply = function(code) { // {{{
 
 // UI.
 _webgame.playercolor = function(num) { // {{{
-	if (window[current].playercolor !== undefined)
-		return window[current].playercolor(num);
+	if (game.playercolor !== undefined)
+		return game.playercolor(num);
 	var colors = ['#f00', '#00f', '#0f0', '#f0f', '#ff0', '#0ff', '#fff', '#000'];
 	num %= colors.length;
 	return colors[num];
@@ -965,8 +1011,8 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 	please.dom.context.fill();
 	if (window.camera !== undefined)
 		please.dom.context.translate(-window.camera.location_x, -window.camera.location_y);
-	if (window[current].update_canvas !== undefined && !webgame.use_3d)
-		window[current].update_canvas(please.dom.context);
+	if (game.update_canvas !== undefined && !webgame.use_3d)
+		game.update_canvas(please.dom.context);
 }); // }}}
 
 _webgame.set_language = function(language) { // {{{
@@ -991,10 +1037,10 @@ _webgame.select_language = function() { // {{{
 	if (Public.name == '') {
 		// Don't do custom updates for title screen.
 	}
-	else if (window[current].text_update !== undefined)
-		window[current].text_update();
-	else if (window[current].update !== undefined)
-		window[current].update();
+	else if (game.text_update !== undefined)
+		game.text_update();
+	else if (game.update !== undefined)
+		game.update();
 }; // }}}
 
 _webgame.chat_event = function(event) { // {{{
@@ -1008,7 +1054,7 @@ _webgame.chat_event = function(event) { // {{{
 
 _webgame.change_name = function() { // {{{
 	var name = document.getElementById('playername').value;
-	game('webgame', 'name', name);
+	server('webgame', 'name', name);
 }; // }}}
 
 _webgame.change_gameselect = function() { // {{{
@@ -1020,18 +1066,18 @@ _webgame.change_gameselect = function() { // {{{
 // Commands triggered from buttons on website.
 _webgame.title_join = function() { // {{{
 	var which = _webgame.title_select.options[_webgame.title_select.selectedIndex].value;
-	game('join', which);
+	server('join', which);
 }; // }}}
 
 _webgame.title_view = function() { // {{{
 	var which = _webgame.title_select.options[_webgame.title_select.selectedIndex].value;
-	game('view', which);
+	server('view', which);
 }; // }}}
 
 _webgame.title_new = function() { // {{{
 	var gameselect = document.getElementById('gameselect');
 	var gamename = gameselect.options[gameselect.selectedIndex].value;
-	game('new', gamename, _webgame.new_settings[gamename]);
+	server('new', gamename, _webgame.new_settings[gamename]);
 }; // }}}
 
 // Shared object handling.
@@ -1055,7 +1101,7 @@ _webgame.finish = function(name, args) { // {{{
 		document.title = _webgame.gametitle;
 		_webgame.game.AddClass('hidden');
 		// Clean up old game.
-		if (oldname != '' && window[current].end_game !== undefined) {
+		if (oldname != '' && game.end_game !== undefined) {
 			for (var key in _webgame.ui) {
 				var list = _webgame.ui[key];
 				for (var num = 0; num < list.length; ++num) {
@@ -1068,7 +1114,7 @@ _webgame.finish = function(name, args) { // {{{
 				}
 			}
 			_webgame.ui = {};
-			window[current].end_game();
+			game.end_game();
 		}
 		// Show title screen.
 		var games = [];
@@ -1178,12 +1224,12 @@ _webgame.finish = function(name, args) { // {{{
 			var kickbutton = kick.AddElement('button').AddText(_('Kick'));
 			kickbutton.type = 'button';
 			kickbutton.num = num;
-			kickbutton.AddEvent('click', function() { game('webgame', 'kick', Public.players[this.num].name); });
+			kickbutton.AddEvent('click', function() { server('webgame', 'kick', Public.players[this.num].name); });
 			var swap = tr.AddElement('td', 'swap');
 			var swapbutton = swap.AddElement('button').AddText(_('Swap'));
 			swapbutton.type = 'button';
 			swapbutton.num = num;
-			swapbutton.AddEvent('click', function() { game('webgame', 'swap', this.num); });
+			swapbutton.AddEvent('click', function() { server('webgame', 'swap', this.num); });
 			_webgame.playerrows.push({tr: tr, nametext: undefined, name: name, kick: kickbutton, swap: swapbutton});
 		}
 		for (var i = 0; i < _webgame.playerrows.length; ++i) {
@@ -1219,7 +1265,7 @@ _webgame.finish = function(name, args) { // {{{
 			var kickbutton = kick.AddElement('button').AddText(_('Kick'));
 			kickbutton.type = 'button';
 			kickbutton.num = num;
-			kickbutton.AddEvent('click', function() { game('webgame', 'kick', Public.viewers[this.num].name); });
+			kickbutton.AddEvent('click', function() { server('webgame', 'kick', Public.viewers[this.num].name); });
 			_webgame.viewerrows.push({tr: tr, nametext: undefined, name: name, kick: kickbutton});
 		}
 		for (var i = 0; i < _webgame.viewerrows.length; ++i) {
@@ -1268,16 +1314,16 @@ _webgame.finish = function(name, args) { // {{{
 			var new_value = watch[w][2];
 			cb(new_value, old_value, args);
 		}
-		if (name !== undefined && name !== null && window[current]['update_' + name] !== undefined)
-			window[current]['update_' + name](args);
-		if (window[current].ui !== undefined)
+		if (name !== undefined && name !== null && game['update_' + name] !== undefined)
+			game['update_' + name](args);
+		if (game.ui !== undefined)
 			_webgame.update_ui();
-		if (window[current].update !== undefined) {
+		if (game.update !== undefined) {
 			if (args === null || args === undefined)
-				window[current].update(name, args);
+				game.update(name, args);
 			else {
 				args.splice(0, 0, name);
-				window[current].update.apply(window[current], args);
+				game.update.apply(game, args);
 			}
 		}
 	}
@@ -1288,18 +1334,18 @@ _webgame.finish = function(name, args) { // {{{
 		_webgame.footer.RemoveClass('hidden');
 		_webgame.server.lock();
 		_webgame.load_game(Public.type, function() {
-			if (window[current].viewport !== undefined)
-				webgame.viewport = window[current].viewport;
+			if (game.viewport !== undefined)
+				webgame.viewport = game.viewport;
 			please.renderer.overlay.RemoveClass('hidden');
 			_webgame.game.RemoveClass('hidden');
 			document.title = Public.name + '-' + Public.type;
 			document.getElementById('gamename').ClearAll().AddText(Public.name);
 			if (window.camera !== undefined)
 				_webgame.resize_window();
-			if (window[current].update_canvas !== undefined && !webgame.use_3d)
-				window[current].update_canvas(please.dom.context);
-			if (window[current].new_game !== undefined)
-				window[current].new_game();
+			if (game.update_canvas !== undefined && !webgame.use_3d)
+				game.update_canvas(please.dom.context);
+			if (game.new_game !== undefined)
+				game.new_game();
 			finish_update();
 			_webgame.loading(false);
 		});
@@ -1395,10 +1441,10 @@ _webgame.update_ui = function() { // {{{
 			base_target.push({});
 		sources.push({key: pathstr, source: base_src, target: base_target[0], idx: _webgame.deepcopy(idx)});
 	};
-	for (var key in window[current].ui) {
-		var obj = window[current].ui[key];
+	for (var key in game.ui) {
+		var obj = game.ui[key];
 		var path = key.split('.');
-		var base;
+		var base_src;
 		var pos = 1;
 		if (path[0] == 'Private')
 			base_src = Private;
@@ -1438,7 +1484,7 @@ _webgame.update_ui = function() { // {{{
 
 _webgame.handle_ui = function(key, data) { // {{{
 	// data is {source: object, target: [{node}], idx: array of int}.
-	var obj = window[current].ui[key];
+	var obj = game.ui[key];
 	var get_value = function(attr, raw) {
 		var target;
 		var args = [data.source].concat(data.idx);
@@ -1577,7 +1623,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 				}
 				var image = get_value('image');
 				if (image !== undefined && image !== null)
-					target.div.style.backgroundImage = 'url(games/' + Public.type + '/img-' + (webgame.use_3d ? '3' : '2') + 'd/' + image + ')';
+					target.div.style.backgroundImage = 'url(' + image.src + ')';
 			}
 			data.target.node.tag = tag;
 			var visible = get_value('visible');
@@ -1651,7 +1697,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 					var overlay = get_value('overlay');
 					var text = get_value('text');
 					if (model !== undefined) {
-						data.target.node = please.access(model).instance();
+						data.target.node = model.instance();
 					}
 					else {
 						var size = get_value('size');
