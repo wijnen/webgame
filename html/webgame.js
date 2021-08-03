@@ -3,6 +3,7 @@
 
 // Functions and variables which can be used by user code. {{{
 
+// Variables. {{{
 var Public, Private;	// Shared data.
 var audio;	// Object with play/stop functions for all registered audio files as its members.
 var my_name = null;	// Player name, as returned by the server.
@@ -23,6 +24,7 @@ Object.defineProperty(webgame, "viewport", {
 		_webgame.resize_window(true);
 	}
 });
+// }}}
 
 function server(target) { // {{{
 	var args = [];
@@ -274,6 +276,7 @@ function color_texture(instance, tname, color) { // {{{
 			draw = function() {};
 		}
 		else {
+			console.info(instance.shader.diffuse_texture);
 			var img = please.media.assets[instance.shader.diffuse_texture];
 			w = img.width;
 			h = img.height;
@@ -437,7 +440,7 @@ window.AddEvent('load', function() { // {{{
 window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	_webgame.media_ready = true;
 	if (webgame.use_3d) {
-		// Inject a square 3-D object for generating objects without a model.
+		// Inject a square 3-D object for generating objects without a model. {{{
 		var square = '{"meta": {"jta_version": [0.1]}, "attributes": [{"vertices": {"position": {"type": "Array", "hint": "Float16Array", "item": 3, "data": "ADgAuAAAALgAOAAAALgAuAAAALgAuAEAADgAOAGAADgAuAGAADgAuAAAADgAOAAAALgAOAAAALgAuAEAALgAOAEAADgAOAGA"}, "tcoords": [{"type": "Array", "hint": "Float16Array", "item": 2, "data": "ADyNBo8GADyNBpEGADyNBo8GADyNBpEGADyNBgA8ADyPBgA8ADyNBgA8ADyPBgA8"}]}, "polygons": {"type": "Array", "hint": "Uint16Array", "item": 1, "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsA"}}], "models": {"Plane": {"parent": null, "extra": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": -0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "smooth_normals": false}, "state": {"world_matrix": {"type": "Array", "hint": "Float16Array", "item": 4, "data": "ADwAAAAAAAAAAAA8AAAAAAAAAAAAPAAAAAAAAAAAADw="}}, "struct": 0, "groups": {"default": {"start": 0, "count": 12}}}}, "packed_data": {}}';
 		please.media.assets['square'] = please.gl.__jta_model(square, 'square');
 	}
@@ -572,18 +575,7 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 					obj[objname[p]] = {};
 				obj = obj[objname[p]];
 			}
-			var img = please.access(path);
-
-			// Convert image source to data url.
-			var canvas = Create('canvas');
-			canvas.width = img.naturalWidth;
-			canvas.height = img.naturalHeight;
-			var ctx = canvas.getContext('2d');
-			ctx.drawImage(img, 0, 0);
-			// Create a new img element, otherwise M.Grl's cleanup will be confused.
-			img = Create('img');
-			img.src = canvas.toDataURL('image/png');
-			_webgame._game[current].files[type][i] = img;
+			_webgame._game[current].files[type][i] = please.access(path);
 
 			var item = objname[objname.length - 1];
 			var setup_object = function(obj, item, type, idx) {
@@ -836,10 +828,42 @@ _webgame.load_game = function(gametype, cb) { // {{{
 	window.game = _webgame.game[current];
 	_webgame._game[current] = {files: {}};	// internal data.
 	var loading = 0;
-	var load_done = function() {
+	var asset_index = 0;
+	var load_done1 = function() {
+		// Loading pass 2: script and stylesheets are loaded (once loading is 0); now load jta and gani files.
+		console.info(asset_index, loading, _webgame.games[current][webgame.use_3d ? 'load3d' : 'load2d'], webgame.use_3d);
 		loading -= 1;
 		if (loading > 0)
 			return;
+		var list = _webgame.games[current][webgame.use_3d ? 'load3d' : 'load2d'];
+		while (asset_index < list.length) {
+			var asset = list[asset_index];
+			asset_index += 1;
+			var type = asset.type;
+			if (type != 'jta' && type != 'gani')
+				continue;
+			// Set image path to the jta or gani directory during loading, for their textures.
+			var m = asset.path.match(/(.*)\/.*?/);
+			please.set_search_path('img', 'games/' + current + '/' + m[1]);
+			if (_webgame._game[current].files[type] === undefined)
+				_webgame._game[current].files[type] = [];
+			_webgame._game[current].files[type].push([asset.object, asset.path] + '/');
+			loading += 1;
+			please.load(asset.path, load_done1);
+			// Wait for loading to complete, so the image search path isn't changed while it is still needed.
+			return;
+		}
+		// Set image search path for standalone images.
+		please.set_search_path('img', 'games/' + current + '/');
+		load_done2();
+	};
+	var load_done2 = function() {
+		// Loading pass 3: script, stylesheets, gani and jta files are loaded; now the other assets should load.
+		console.info('load 2', loading);
+		loading -= 1;
+		if (loading > 0)
+			return;
+		loading = 0; // It becomes -1 if called without anything to load.
 		// _webgame._game[gametype].files is an object with one array per file type (image, jta, audio, etc).
 		// Each element is [object, path]. The object is an array like ['image', 'outside', 'house'].
 		// The path is the filename which can be used with please.access().
@@ -852,17 +876,26 @@ _webgame.load_game = function(gametype, cb) { // {{{
 		if (list.length > 0) {
 			for (var f = 0; f < list.length; ++f) {
 				var type = list[f].type;
+				if (type == 'jta' || type == 'gani') {
+					// jta and gani files need the image search path to be set to their own path, so they need to be loaded later.
+					continue;
+				}
 				if (_webgame._game[current].files[type] === undefined)
 					_webgame._game[current].files[type] = [];
 				_webgame._game[current].files[type].push([list[f].object, list[f].path]);
 				loading += 1;
 				//console.info('loading', list[f].path);
-				please.load(list[f].path);
+				please.load(list[f].path, load_done3);
+				please.set_search_path('img', 'games/' + current + '/');
 			}
 		}
-		else
-			window.dispatchEvent(new CustomEvent('mgrl_media_ready'));
+		if (loading == 0)
+			load_done3();
 	};
+	var load_done3 = function() {
+		// Everything is loaded. Call the event.
+		window.dispatchEvent(new CustomEvent('mgrl_media_ready'));
+	}
 	if (webgame.use_3d === null) {
 		// Both 2-D and 3-D are possible.
 		if (webgame.args.interface == '2d') {
@@ -884,14 +917,17 @@ _webgame.load_game = function(gametype, cb) { // {{{
 				please.dom.set_context('canvas');
 		}
 		_webgame.files = {};
-		var paths = ['img', 'jta', 'gani', 'audio', 'glsl', 'text'];
+		// Set search paths.
+		var paths = ['jta', 'gani', 'audio', 'glsl', 'text'];
 		for (var i = 0; i < paths.length; ++i)
 			please.set_search_path(paths[i], 'games/' + current + '/');
 		_webgame.loaded[current] = true;
+
+		// Load game script.
 		var head = document.getElementsByTagName('head')[0];
 		var load_script = function(index, scripts) {
 			if (index >= scripts.length) {
-				load_done();
+				load_done1();
 				return;
 			}
 			var script = head.AddElement('script');
@@ -900,16 +936,19 @@ _webgame.load_game = function(gametype, cb) { // {{{
 		};
 		loading += 1;
 		load_script(0, _webgame.games[current].script);
+
+		// Load stylesheet.
 		for (var s = 0; s < _webgame.games[current].style.length; ++s) {
 			loading += 1;
 			var link = head.AddElement('link');
-			link.AddEvent('load', load_done);
+			link.AddEvent('load', load_done1);
 			link.rel = 'stylesheet';
 			link.href = _webgame.games[current].style[s];
 		}
 	}
+
 	if (loading == 0)
-		load_done();
+		load_done1();
 }; // }}}
 
 _webgame.end = function(result) { // {{{
@@ -1689,6 +1728,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 				if (obj.click !== undefined) {
 					data.target.node.selectable = true;
 					data.target.node.on_click = function(event) {
+						this.event = event;
 						// Call click() with the standard arguments; ignore return value.
 						get_value('click');
 					};
@@ -1746,6 +1786,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 					if (obj.click !== undefined) {
 						data.target.node.selectable = true;
 						data.target.node.on_click = function(event) {
+							this.event = event;
 							// Call click() with the standard arguments; ignore return value.
 							get_value('click');
 						};
@@ -1777,6 +1818,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 			if (obj.click !== undefined) {
 				data.target.node.selectable = true;
 				data.target.node.on_click = function(event) {
+					this.event = event;
 					// Call click() with the standard arguments; ignore return value.
 					get_value('click');
 				};
