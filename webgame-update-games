@@ -17,10 +17,18 @@ Paths:
 			<gamename>.py
 '''
 
+import sys
 import os
+import subprocess
 import fhs
 from network import log
 config = fhs.init(help = 'Update all webgame games', version = '0.1', contact = 'Bas Wijnen <wijnen@debian.org>', packagename = 'webgame', game = True)
+
+def run(cmd, input = None):
+	if input is None:
+		return subprocess.run(cmd, shell = True, close_fds = True, stdout = subprocess.PIPE).stdout
+	else:
+		return subprocess.run(cmd, shell = True, close_fds = True, input = input, stdout = subprocess.PIPE).stdout
 
 # Find all games.
 games = fhs.read_data('games', dir = True, multiple = True)
@@ -97,4 +105,59 @@ for gamesdir in games:
 			log('skipping ' + game + ': already exists and is not a symlink')
 
 		# Update translations.
+
+		# All translations are done in the browser.
+		# Sources of translated strings in game files:
+		# - Python files (main game file and local modules)
+		# - javascript files
+		# Sources of translated strings in system files:
+		# - webgame
+		# - html/webgame.js
+		# game and system files go into separate po (and pot) files.
+		# The system strings have their own mo file.
+		# Every language has a single mo file per game.
+		# This code generates the mo files for the game strings.
+
+		# File locations:
+		# webgame po: system strings, in webgame data path.
+		# game po: game strings, in gamedir/po/lang.po
+		# game pot: generated on the fly; not stored.
+		# game mo: generated on the fly; not stored.
+		# game js: all resulting strings
 		# TODO.
+
+
+year = time.strftime('%Y').encode('utf-8')
+date = time.strftime('%F %H:%M%z').encode('utf-8')
+
+def xgettext(programming_language, sources, input = None):
+	'''xgettext extracts strings from a source file and generates a pot file.'''
+	return run ("xgettext --add-comments --from-code UTF-8 --package-name '" +
+			name.replace("'", r"\'") +
+			"' --msgid-bugs-address " + config['bugs'] +
+			' -L ' + programming_language +
+			' ' + ('- ' if input is not None else '') + ' '.join(sources) +
+			' -o -',
+			input) \
+		.replace(b'\n"Content-Type: text/plain; charset=CHARSET\\n"\n', b'\n"Content-Type: text/plain; charset=UTF-8\\n"\n') \
+		.replace(b'\n# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.\n', b'\n# ' + config['copyright'].encode('utf-8') + b', ' + year + b'.\n') \
+		.replace(b"\n# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER\n", b'\n# Copyright (C) ' + year + b' ' + config['copyright'].encode('utf-8') + b'\n') \
+		.replace(b'\n"Last-Translator: FULL NAME <EMAIL@ADDRESS>\\n"\n', b'\n"Last-Translator: ' + config['copyright'].encode('utf-8') + b'\\n"\n') \
+		.replace(b'\n"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n"\n', b'\n"PO-Revision-Date: ' + date + b'\\n"\n')
+
+# Create pot into a variable.
+name = config['name'] or os.path.basename(os.path.abspath(os.curdir)).capitalize()
+pyfiles = [x for x in os.listdir(os.curdir) if x.endswith('.py') or x == 'ai']
+jsfiles = [os.path.join('html', x) for x in os.listdir('html') if x.endswith('.js')]
+pypot = xgettext('Python', pyfiles)
+jspot = xgettext("JavaScript", jsfiles, ('// The language name of the translation, for the dropdown selection\nconsole.info(_("' + name.replace('"', '\\"') + '"), _("Language Name"));').encode('utf-8'))
+with fhs.write_temp(text = False) as tmp:
+	tmp.write(pypot)
+	tmp.flush()
+	pot = run('msgcat - %s -o-' % tmp.filename, jspot)
+
+# Run msgmerge for each translation. This updates the existing translation with the new pot.
+for f in os.listdir('po'):
+	if not f.endswith('.po'):
+		continue
+	run('msgmerge --quiet --lang %s -U %s -' % (os.path.splitext(f)[0], os.path.join('po', f)), pot)

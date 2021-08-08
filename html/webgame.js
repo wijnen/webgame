@@ -682,7 +682,7 @@ _webgame.init = function(languages, settings) { // {{{
 	for (var l = 0; l < have_languages.length; ++l)
 		_webgame.languages.push(have_languages[l]);
 	var select = document.getElementById('language_select');
-	if (_webgame.languages.length == 0)
+	if (_webgame.languages.length <= 1)
 		select.AddClass('hidden');
 	else {
 		for (var e in _webgame.languages) {
@@ -811,7 +811,8 @@ _webgame.init = function(languages, settings) { // {{{
 						radio.checked = true;
 				}
 			}
-			else if (setting.type == 'multiple') {
+			else if (setting.type == 'checkbox') {
+				// TODO
 			}
 		}
 	}
