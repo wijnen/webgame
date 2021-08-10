@@ -276,11 +276,19 @@ function color_texture(instance, tname, color) { // {{{
 			draw = function() {};
 		}
 		else {
-			console.info(instance.shader.diffuse_texture);
-			var img = please.media.assets[instance.shader.diffuse_texture];
-			w = img.width;
-			h = img.height;
-			draw = function() { ctx.drawImage(img, 0, 0); }
+			//console.info(instance.shader.diffuse_texture);
+			var imgname = instance.shader.diffuse_texture;
+			if (imgname === null || imgname == 'error_image') {
+				w = 1;
+				h = 1;
+				draw = function() {};
+			}
+			else {
+				var img = please.media.assets[instance.shader.diffuse_texture];
+				w = img.width;
+				h = img.height;
+				draw = function() { ctx.drawImage(img, 0, 0); }
+			}
 		}
 		canvas.width = w;
 		canvas.height = h;
@@ -289,7 +297,7 @@ function color_texture(instance, tname, color) { // {{{
 		ctx.fillRect(0, 0, w, h);
 		draw();
 		please.media.assets[tname] = canvas;
-		dbg('created image', tname, 'with color', color);
+		//dbg('created image', tname, 'with color', color);
 	}
 	if (instance !== null)
 		instance.shader.diffuse_texture = tname;
@@ -346,24 +354,6 @@ var _webgame = { // {{{
 	_game: {}	// internal data
 }; // }}}
 
-// Parse url arguments. {{{
-webgame.args = {};
-if (document.location.search[0] == '?') {
-	var s = document.location.search.substring(1).split('&');
-	for (var i = 0; i < s.length; ++i) {
-		var kv = s[i].split('=', 2);
-		if (kv.length == 0)
-			continue;
-		var key = decodeURIComponent(kv[0]);
-		var value = (kv.length == 2 ? decodeURIComponent(kv[1]) : null);
-		if (webgame.args[key] !== undefined)
-			continue
-		webgame.args[key] = value;
-		_webgame.argorder.push(key);
-	}
-}
-// }}}
-
 _webgame.update_camera = function() { // {{{
 	if (window.camera === undefined)
 		return;
@@ -406,8 +396,12 @@ window.AddEvent('load', function() { // {{{
 	Private = { state: '' };
 	set_state('');
 	var messages = {
-		webgame: function(target, arg1, arg2) {
-			_webgame[target](arg1, arg2);
+		webgame: function() {
+			var name = arguments[0];
+			var args = [];
+			for (var a = 1; a < arguments.length; ++a)
+				args.push(arguments[a]);
+			_webgame[name].apply(_webgame, args);
 		},
 		'': function() {
 			if (current === null) {
@@ -434,16 +428,35 @@ window.AddEvent('load', function() { // {{{
 			_webgame.body.AddClass('disconnected');
 		}
 	);
-});
 
-
-window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
-	_webgame.media_ready = true;
-	if (webgame.use_3d) {
-		// Inject a square 3-D object for generating objects without a model. {{{
-		var square = '{"meta": {"jta_version": [0.1]}, "attributes": [{"vertices": {"position": {"type": "Array", "hint": "Float16Array", "item": 3, "data": "ADgAuAAAALgAOAAAALgAuAAAALgAuAEAADgAOAGAADgAuAGAADgAuAAAADgAOAAAALgAOAAAALgAuAEAALgAOAEAADgAOAGA"}, "tcoords": [{"type": "Array", "hint": "Float16Array", "item": 2, "data": "ADyNBo8GADyNBpEGADyNBo8GADyNBpEGADyNBgA8ADyPBgA8ADyNBgA8ADyPBgA8"}]}, "polygons": {"type": "Array", "hint": "Uint16Array", "item": 1, "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsA"}}], "models": {"Plane": {"parent": null, "extra": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": -0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "smooth_normals": false}, "state": {"world_matrix": {"type": "Array", "hint": "Float16Array", "item": 4, "data": "ADwAAAAAAAAAAAA8AAAAAAAAAAAAPAAAAAAAAAAAADw="}}, "struct": 0, "groups": {"default": {"start": 0, "count": 12}}}}, "packed_data": {}}';
-		please.media.assets['square'] = please.gl.__jta_model(square, 'square');
+	// Parse url arguments. {{{
+	webgame.args = {};
+	if (document.location.search[0] == '?') {
+		var s = document.location.search.substring(1).split('&');
+		for (var i = 0; i < s.length; ++i) {
+			var kv = s[i].split('=', 2);
+			if (kv.length == 0)
+				continue;
+			var key = decodeURIComponent(kv[0]);
+			var value = (kv.length == 2 ? decodeURIComponent(kv[1]) : null);
+			if (webgame.args[key] !== undefined)
+				continue
+			webgame.args[key] = value;
+			_webgame.argorder.push(key);
+		}
 	}
+	var dimension = document.getElementById('dimensionselect');
+	if (webgame.args.interface == '2d')
+		dimension.selectedIndex = 0;
+	else
+		dimension.selectedIndex = 1;
+	// }}}
+
+	window.AddEvent('mgrl_media_ready', please.once(function() { _webgame.load_done('mgrl'); }));
+}); // }}}
+
+_webgame.setup_mgrl = function() { // {{{
+	_webgame.media_ready = true;
 	window.graph = new please.SceneGraph();
 	window.camera = new please.CameraNode();
 	graph.add(window.camera);
@@ -561,57 +574,6 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	}
 	window.camera.activate();
 
-	// Finish setting up files.
-	console.info('finish loading');
-	for (var type in _webgame._game[current].files) {
-		game[type] = {};
-		console.info('type', type, 'length', _webgame._game[current].files[type].length, 'current', current);
-		for (var i = 0; i < _webgame._game[current].files[type].length; ++i) {
-			var objname = _webgame._game[current].files[type][i][0];
-			var path = _webgame._game[current].files[type][i][1];
-			var obj = game[type];
-			for (var p = 0; p < objname.length - 1; ++p) {
-				if (obj[objname[p]] === undefined)
-					obj[objname[p]] = {};
-				obj = obj[objname[p]];
-			}
-			_webgame._game[current].files[type][i] = please.access(path);
-
-			var item = objname[objname.length - 1];
-			var setup_object = function(obj, item, type, idx) {
-				// The purpose of this function is to create a scope for type and idx for each iteration of the for loop.
-
-				// Most types call instance() when the object is called. Some have special handling.
-				if (type == 'audio') {
-					// Play (or stop) the audio when calling the object.
-					obj[item] = function(loop) {
-						// If loop is null, stop playing.
-						// If loop is undefined, play the file once.
-						// If loop is true, loop the file.
-						// If loop is false, stop looping, but finish possible current playback.
-						if (loop === null) {
-							_webgame._game[current].files.audio[idx].stop();
-							return;
-						}
-						_webgame._game[current].files.audio[idx].loop = loop === true;
-						if (loop !== false) {
-							_webgame._game[current].files.audio[idx].currentType = 0;
-							_webgame._game[current].files.audio[idx].play();
-						}
-					};
-				}
-				else if (type == 'image') {
-					// Return an img html element. Its src can be used by others.
-					obj[item] = function() { return _webgame._game[current].files[type][idx]; };
-				}
-				else {
-					obj[item] = function() { return _webgame._game[current].files[type][idx].instance(); };
-				}
-			};
-			setup_object(obj, item, type, i);
-		}
-	}
-
 	window.AddEvent('resize', _webgame.resize_window);
 	var events = ['keydown', 'keyup'];
 	for (var e = 0; e < events.length; ++e) {
@@ -634,7 +596,7 @@ window.AddEvent('mgrl_media_ready', please.once(function() { // {{{
 	if (_webgame.load_cb)
 		_webgame.load_cb();
 	_webgame.server.unlock();
-})); // }}}
+}; // }}}
 
 _webgame.loading = function(state) { // {{{
 	var body = document.getElementsByTagName('body')[0]
@@ -651,39 +613,23 @@ _webgame.id = function(name, num) { // {{{
 	_webgame.update_url();
 }; // }}}
 
-_webgame.init = function(languages, settings) { // {{{
-	//console.info(languages, settings);
+_webgame.init = function(lang, languages, translations, settings) { // {{{
+	//console.info(lang, languages, translations, settings);
 	_webgame.games = settings;
 	_webgame.gamelist = [];
 	for (var g in _webgame.games)
 		_webgame.gamelist.push(g);
 	_webgame.gamelist.sort();
 	// Set up language select. {{{
-	var have_languages = [];
-	for (var language in _webgame.translations)
-		have_languages.push(language);
-	have_languages.sort();
 	_webgame.languages = [];
-	outer: for (var l = 0; l < languages.length; ++l) {
-		var test = [function(a, b) { return a == b; }, function(a, b) { return a[0] + a[1] == b[0] + b[1]; }];
-		for (var t = 0; t < test.length; ++t) {
-			for (var candidate = 0; candidate < have_languages.length; ++candidate) {
-				if (test[t](languages[l], have_languages[candidate])) {
-					_webgame.languages.push(have_languages[candidate]);
-					have_languages.splice(candidate, 1);
-					continue outer;
-				}
-			}
-		}
-	}
-	if (have_languages.length < 2)
-		document.getElementById('language_selector').AddClass('hidden');
-	_webgame.languages.push('');
-	for (var l = 0; l < have_languages.length; ++l)
-		_webgame.languages.push(have_languages[l]);
+	for (var language in languages)
+		_webgame.languages.push(language);
+	_webgame.languages.sort();
 	var select = document.getElementById('language_select');
-	if (_webgame.languages.length <= 1)
+	if (_webgame.languages.length < 2) {
+		document.getElementById('language_selector').AddClass('hidden');
 		select.AddClass('hidden');
+	}
 	else {
 		for (var e in _webgame.languages) {
 			if (_webgame.languages[e] == '') {
@@ -697,7 +643,7 @@ _webgame.init = function(languages, settings) { // {{{
 			}
 		}
 	}
-	_webgame.set_language(_webgame.languages[0]);
+	_webgame.set_language(lang);
 	document.getElementById('playername').value = my_name;
 	_webgame.gametitle = document.title;
 	_webgame.titlescreen = document.getElementById('title');
@@ -741,7 +687,6 @@ _webgame.init = function(languages, settings) { // {{{
 	} // }}}
 	for (var g = 0; g < _webgame.gamelist.length; ++g) {
 		var game = _webgame.games[_webgame.gamelist[g]];
-		//console.info(game.name);
 		select.AddElement('option').AddText(game.name);
 	}
 	var radiocount = 0;
@@ -783,6 +728,8 @@ _webgame.init = function(languages, settings) { // {{{
 			else if (setting.type == 'select') {
 				_webgame.new_settings[gamename][key] = 0;
 				var select = value.AddElement('select');
+				if (setting.options.length == 1)
+					tr.AddClass('hidden');
 				for (var o = 0; o < setting.options.length; ++o) {
 					var option = setting.options[o];
 					select.AddElement('option').AddText(option);
@@ -794,6 +741,8 @@ _webgame.init = function(languages, settings) { // {{{
 			else if (setting.type == 'radio') {
 				radiocount += 1;
 				_webgame.new_settings[gamename][key] = 0;
+				if (setting.options.length == 1)
+					tr.AddClass('hidden');
 				for (var o = 0; o < setting.options.length; ++o) {
 					var option = setting.options[o];
 					if (o > 0)
@@ -807,8 +756,10 @@ _webgame.init = function(languages, settings) { // {{{
 					radio.key = key;
 					radio.retval = option;
 					radio.AddEvent('click', function() { _webgame.new_settings[this.gamename][this.key] = this.retval; });
-					if (setting['default'] == option || o == 0)
+					if (setting['default'] == option || o == 0) {
 						radio.checked = true;
+						_webgame.new_settings[gamename][key] = option;
+					}
 				}
 			}
 			else if (setting.type == 'checkbox') {
@@ -821,139 +772,181 @@ _webgame.init = function(languages, settings) { // {{{
 }; // }}}
 
 _webgame.load_game = function(gametype, cb) { // {{{
-	_webgame.loading(true);
-	// First load all new javascript, then run remaining code and start m.grl machinery.
-	_webgame.load_cb = cb;
 	current = gametype;
+	if (_webgame.loaded[current]) {
+		// TODO: some things from setup need to be done.
+		// TODO: unload old game.
+		cb();
+		return;
+	}
+	_webgame.loaded[current] = true;
+	_webgame.loading(true);
+	// First load stylesheets and assets, load scripts when that is done. Then set up m.grl.
+	_webgame.load_cb = cb;
 	_webgame.game[current] = {};	// user accessible data.
 	window.game = _webgame.game[current];
 	_webgame._game[current] = {files: {}};	// internal data.
+	// Set up use_3d. Rules:
+	// If game only supports one of them, use that.
+	// Otherwise, use user selection.
+	if (_webgame.games[current].use_3d !== null) {
+		// The game only supports one type.
+		webgame.use_3d = _webgame.games[current].use_3d;
+		_webgame.force_2d = false;
+	}
+	else if (document.getElementById('dimensionselect').selectedIndex == 0) {
+		// The user requested a 2-D interface, so use that.
+		webgame.use_3d = false;
+		_webgame.force_2d = true;
+	}
+	else {
+		// Nothing was specified, use the game's default.
+		webgame.use_3d = true;
+		_webgame.force_2d = false;
+	}
 	var loading = 0;
-	var asset_index = 0;
-	var load_done1 = function() {
-		// Loading pass 2: script and stylesheets are loaded (once loading is 0); now load jta and gani files.
-		console.info(asset_index, loading, _webgame.games[current][webgame.use_3d ? 'load3d' : 'load2d'], webgame.use_3d);
-		loading -= 1;
-		if (loading > 0)
-			return;
-		var list = _webgame.games[current][webgame.use_3d ? 'load3d' : 'load2d'];
-		while (asset_index < list.length) {
-			var asset = list[asset_index];
-			asset_index += 1;
-			var type = asset.type;
-			if (type != 'jta' && type != 'gani')
-				continue;
-			// Set image path to the jta or gani directory during loading, for their textures.
-			var m = asset.path.match(/(.*)\/.*?/);
-			please.set_search_path('img', 'games/' + current + '/' + m[1]);
-			if (_webgame._game[current].files[type] === undefined)
-				_webgame._game[current].files[type] = [];
-			_webgame._game[current].files[type].push([asset.object, asset.path] + '/');
-			loading += 1;
-			please.load(asset.path, load_done1);
-			// Wait for loading to complete, so the image search path isn't changed while it is still needed.
-			return;
-		}
-		// Set image search path for standalone images.
-		please.set_search_path('img', 'games/' + current + '/');
-		load_done2();
-	};
-	var load_done2 = function() {
-		// Loading pass 3: script, stylesheets, gani and jta files are loaded; now the other assets should load.
-		console.info('load 2', loading);
-		loading -= 1;
-		if (loading > 0)
-			return;
-		loading = 0; // It becomes -1 if called without anything to load.
-		// _webgame._game[gametype].files is an object with one array per file type (image, jta, audio, etc).
-		// Each element is [object, path]. The object is an array like ['image', 'outside', 'house'].
-		// The path is the filename which can be used with please.access().
-		// When loading is complete, the path is replaced with the result of that call.
 
-		// For each file type, a nested object will be placed in the
-		// game object. For example, the house above will be
-		// accessible as game.image.outside.house
-		var list = _webgame.games[current][webgame.use_3d ? 'load3d' : 'load2d'];
-		if (list.length > 0) {
-			for (var f = 0; f < list.length; ++f) {
-				var type = list[f].type;
-				if (type == 'jta' || type == 'gani') {
-					// jta and gani files need the image search path to be set to their own path, so they need to be loaded later.
-					continue;
+	// Set search paths.
+	var paths = ['img', 'jta', 'gani', 'audio', 'glsl', 'text'];
+	for (var i = 0; i < paths.length; ++i)
+		please.set_search_path(paths[i], 'games/' + current + '/');
+	var list, other;
+	if (webgame.use_3d) {
+		list = 'load3d';
+		other = 'load2d';
+	}
+	else {
+		list = 'load2d';
+		other = 'load3d';
+	}
+	list = _webgame.games[current][list];
+	other = _webgame.games[current][other];
+	// Fill all objects from unused ui type so they can be referenced without an error (though they will all be undefined).
+	for (var asset_index = 0; asset_index < other.length; ++asset_index) {
+		var asset = other[asset_index];
+		var objname = asset.object;
+		var path = asset.path;
+		var obj = game[asset.type];
+		if (game[asset.type] === undefined)
+			game[asset.type] = {};
+		for (var p = 0; p < objname.length - 1; ++p) {
+			if (obj[objname[p]] === undefined)
+				obj[objname[p]] = {};
+			obj = obj[objname[p]];
+		}
+	}
+	for (var asset_index = 0; asset_index < list.length; ++asset_index) {
+		var asset = list[asset_index];
+		if (_webgame._game[current].files[asset.type] === undefined)
+			_webgame._game[current].files[asset.type] = [];
+		_webgame._game[current].files[asset.type].push([asset.object, asset.path]);
+		loading = 1;	// Set to 1 if at least 1 file is loaded.
+		//console.info('loading', asset.path);
+		please.load(asset.path, undefined, (asset.type == 'jta' || asset.type == 'gani' ? {search_paths: {img: 'games/' + current + '/' + asset.path.replace(/^(.*)\/.*?$/, '$1')}} : undefined));
+	}
+
+	var head = document.getElementsByTagName('head')[0];
+	// Load stylesheet.
+	for (var s = 0; s < _webgame.games[current].style.length; ++s) {
+		loading += 1;
+		var link = head.AddElement('link');
+		link.AddEvent('load', function() { _webgame.load_done('stylesheet'); });
+		link.rel = 'stylesheet';
+		link.href = _webgame.games[current].style[s];
+	}
+	_webgame.load_done = function(loaded) {
+		loading -= 1;
+		if (loading > 0)
+			return;
+
+		if (webgame.use_3d) {
+			// Inject a square 3-D object for generating objects without a model. {{{
+			var square = '{"meta": {"jta_version": [0.1]}, "attributes": [{"vertices": {"position": {"type": "Array", "hint": "Float16Array", "item": 3, "data": "ADgAuAAAALgAOAAAALgAuAAAALgAuAEAADgAOAGAADgAuAGAADgAuAAAADgAOAAAALgAOAAAALgAuAEAALgAOAEAADgAOAGA"}, "tcoords": [{"type": "Array", "hint": "Float16Array", "item": 2, "data": "ADyNBo8GADyNBpEGADyNBo8GADyNBpEGADyNBgA8ADyPBgA8ADyNBgA8ADyPBgA8"}]}, "polygons": {"type": "Array", "hint": "Uint16Array", "item": 1, "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsA"}}], "models": {"Plane": {"parent": null, "extra": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": -0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "smooth_normals": false}, "state": {"world_matrix": {"type": "Array", "hint": "Float16Array", "item": 4, "data": "ADwAAAAAAAAAAAA8AAAAAAAAAAAAPAAAAAAAAAAAADw="}}, "struct": 0, "groups": {"default": {"start": 0, "count": 12}}}}, "packed_data": {}}';
+			please.media.assets['square'] = please.gl.__jta_model(square, 'square');
+		}
+
+		// Finish setting up files.
+		for (var type in _webgame._game[current].files) {
+			game[type] = {};
+			for (var i = 0; i < _webgame._game[current].files[type].length; ++i) {
+				var objname = _webgame._game[current].files[type][i][0];
+				var path = _webgame._game[current].files[type][i][1];
+				var obj = game[type];
+				for (var p = 0; p < objname.length - 1; ++p) {
+					if (obj[objname[p]] === undefined)
+						obj[objname[p]] = {};
+					obj = obj[objname[p]];
 				}
-				if (_webgame._game[current].files[type] === undefined)
-					_webgame._game[current].files[type] = [];
-				_webgame._game[current].files[type].push([list[f].object, list[f].path]);
-				loading += 1;
-				//console.info('loading', list[f].path);
-				please.load(list[f].path, load_done3);
-				please.set_search_path('img', 'games/' + current + '/');
+				_webgame._game[current].files[type][i] = please.access(path);
+
+				var item = objname[objname.length - 1];
+				var setup_object = function(obj, item, type, idx, path) {
+					// The purpose of this function is to create a scope for type and idx for each iteration of the for loop.
+
+					// Most types call instance() when the object is called. Some have special handling.
+					if (type == 'audio') {
+						// Play (or stop) the audio when calling the object.
+						obj[item] = function(loop) {
+							// If loop is null, stop playing.
+							// If loop is undefined, play the file once.
+							// If loop is true, loop the file.
+							// If loop is false, stop looping, but finish possible current playback.
+							if (loop === null) {
+								_webgame._game[current].files.audio[idx].stop();
+								return;
+							}
+							_webgame._game[current].files.audio[idx].loop = loop === true;
+							if (loop !== false) {
+								_webgame._game[current].files.audio[idx].currentType = 0;
+								_webgame._game[current].files.audio[idx].play();
+							}
+						};
+					}
+					else if (type == 'image') {
+						// Return an img html element. Its src and asset_name can be used by others.
+						obj[item] = function() { return _webgame._game[current].files[type][idx]; };
+						obj[item].asset_name = path;
+					}
+					else {
+						obj[item] = function() { return _webgame._game[current].files[type][idx].instance(); };
+					}
+				};
+				setup_object(obj, item, type, i, path);
 			}
 		}
-		if (loading == 0)
-			load_done3();
-	};
-	var load_done3 = function() {
-		// Everything is loaded. Call the event.
-		window.dispatchEvent(new CustomEvent('mgrl_media_ready'));
-	}
-	if (webgame.use_3d === null) {
-		// Both 2-D and 3-D are possible.
-		if (webgame.args.interface == '2d') {
-			// The user requested a 2-D interface, so use that.
-			webgame.use_3d = false;
-			_webgame.force_2d = true;
-		}
-		else {
-			// Use a 3-D interface only if the user didn't refuse it, and the game allows it.
-			webgame.use_3d = _webgame.games[current].use_3d !== false;
-		}
-	}
-	if (!_webgame.loaded[current]) {
-		if (_webgame.firstgame == true) {
-			_webgame.firstgame = false;
-			if (webgame.use_3d)
-				please.gl.set_context('canvas');
-			else
-				please.dom.set_context('canvas');
-		}
-		_webgame.files = {};
-		// Set search paths.
-		var paths = ['jta', 'gani', 'audio', 'glsl', 'text'];
-		for (var i = 0; i < paths.length; ++i)
-			please.set_search_path(paths[i], 'games/' + current + '/');
-		_webgame.loaded[current] = true;
-
-		// Load game script.
-		var head = document.getElementsByTagName('head')[0];
+		// Load game script(s).
 		var load_script = function(index, scripts) {
 			if (index >= scripts.length) {
-				load_done1();
+				_webgame.setup_mgrl();
 				return;
 			}
 			var script = head.AddElement('script');
 			script.AddEvent('load', function() { load_script(index + 1, scripts); });
 			script.src = scripts[index];
 		};
-		loading += 1;
-		load_script(0, _webgame.games[current].script);
-
-		// Load stylesheet.
-		for (var s = 0; s < _webgame.games[current].style.length; ++s) {
-			loading += 1;
-			var link = head.AddElement('link');
-			link.AddEvent('load', load_done1);
-			link.rel = 'stylesheet';
-			link.href = _webgame.games[current].style[s];
+		if (_webgame.games[current].script.length == 0) {
+			// There are no script; probably a useless game, but we shouldn't crash on it.
+			console.warn("Game has no scripts; it probably won't do anything");
+			_webgame.setup_mgrl();
 		}
+		else
+			load_script(0, _webgame.games[current].script);
+	};
+
+	if (_webgame.firstgame == true) {
+		_webgame.firstgame = false;
+		if (webgame.use_3d)
+			please.gl.set_context('canvas');
+		else
+			please.dom.set_context('canvas');
 	}
 
 	if (loading == 0)
-		load_done1();
+		_webgame.load_done();
 }; // }}}
 
 _webgame.end = function(result) { // {{{
-	dbg('Game ended', result);
+	//dbg('Game ended', result);
 	if (game.end !== undefined)
 		game.end(result);
 	else
@@ -1748,7 +1741,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 					var overlay = get_value('overlay');
 					var text = get_value('text');
 					if (model !== undefined) {
-						data.target.node = model.instance();
+						data.target.node = model;
 					}
 					else {
 						var size = get_value('size');
@@ -1759,7 +1752,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 								data.target.node.shader = {};
 							var image = get_value('image');
 							if (image !== undefined)
-								data.target.node.shader.diffuse_texture = image;
+								data.target.node.shader.diffuse_texture = image.asset_name || image.src;
 							else {
 								var tname = 'blank-' + size[2] + '-' + size[3];
 								if (please.media.assets[tname] === undefined) {
@@ -1917,7 +1910,7 @@ _webgame.update_url = function() { // {{{
 		sep = '&';
 	}
 	history.replaceState(null, document.title, state);
-}; // }}}
+} // }}}
 // }}}
 
 function dbg() {

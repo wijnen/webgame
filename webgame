@@ -26,6 +26,8 @@ import os
 import time
 import json
 import re
+import subprocess
+import io
 import collections
 import importlib
 fhs.option('port', 'network port to listen for client connections on', default = '8891')
@@ -109,6 +111,9 @@ _settings = {}
 # Translations of system strings.
 # Keys are language codes, values are dicts of source strings to translated strings.
 translations = {}
+
+# Allowed number of players, per game (each value is an array of ints).
+allowed_players = {'': [0]}
 
 # Translations are done in the browser. This allows marking strings as translatable.
 _ = lambda x: x
@@ -428,39 +433,62 @@ def broadcast_shared(target, path, value, group = None): # {{{
 # }}}
 # }}}
 
-def read_translation(filename): # {{{
-	'''Convert a po file into a dict that can be sent to the players.
-	filename is the filename (full path) of the po file.
+def read_translation(gamename, dirname = None): # {{{
+	'''Convert po files into a dict that can be sent to the players.
+	if gamename is not '' (for system strings), dirname is the full path of the po directory.
 	'''
-	try:
-		data = subprocess.run('msgcat {} | msgfmt -o - -'.format(filename), shell = True, close_fds = True, stdout = subprocess.PIPE).stdout
-	except:
-		log('Warning: translation could not be read from {}'.format(filename))
-		traceback.print_exc()
-		return {}
-	terms = gettext.GNUTranslations()
-	terms._parse(io.BytesIO(data))
-	# Convert catalog to regular dict, just in case it wasn't.
-	terms = {k: v for k, v in terms._catalog.items()}
-	return terms
+	ret = {}
+	if gamename == '':
+		po_dirs = fhs.read_data('po', dir = True, multiple = True)
+	else:
+		po_dirs = (dirname,)
+	for po_dir in po_dirs:
+		if not os.path.isdir(po_dir):
+			continue
+		for po in os.listdir(po_dir):
+			filename = os.path.join(po_dir, po)
+			lang, ext = os.path.splitext(po)
+			if ext != os.extsep + 'po' or lang.startswith('.') or not os.path.isfile(filename):
+				continue
+			# Earlier files take precedence.
+			if lang in ret:
+				log('not using duplicate translations for {} for language {}'.format(lang, gamename))
+				continue
+			if gamename != '' and lang not in languages:
+				log("Warning: ignoring language {} for game {}, because it's not available for system strings".format(lang, gamename))
+				continue
+			try:
+				data = subprocess.run('msgcat {} | msgfmt -o - -'.format(filename), shell = True, close_fds = True, stdout = subprocess.PIPE).stdout
+				assert len(data) > 0
+			except:
+				log('Warning: translation could not be read from {}'.format(filename))
+				traceback.print_exc()
+				ret[lang] = {'Language Name': str(filename) + ' (translation file read error)'}
+			terms = gettext.GNUTranslations()
+			terms._parse(io.BytesIO(data))
+			# Convert catalog to regular dict, just in case it wasn't.
+			terms = {k: v for k, v in terms._catalog.items()}
+			ret[lang] = terms
+	return ret
 
 # Read system translations.
-translations[None] = read_translation(fhs.read_data('system.po', opened = False))
-# Add empty title game translations to avoid as special case when sending it.
-translations[''] = {}
-languages = {code: translations[code]['Language Name'] for code in translations if code is not None}
+translations[''] = read_translation('')
+languages = {code: translations[code].get('Language Name', str(code) + ' (untranslated)') for code in translations if code != ''}
 # }}}
 
-def parse_settings(settings, name): # {{{
+def parse_settings(settings, gamename): # {{{
+	name = gamename.capitalize()
 	lines = settings.split('\n')
 	current = None
 	num_players = None
+	default_players = None
+	settings_use_3d = None
 	ret = []
 	for ln, line in enumerate(lines):
 		# Ignore empty lines and comments.
 		if line.strip() == '' or line.strip().startswith('#'):
 			continue
-		key, value = map(strip, line.split(':', 1))
+		key, value = map(str.strip, line.split(':', 1))
 		if key == 'setting':
 			current = {'key': value}
 			ret.append(current)
@@ -474,14 +502,26 @@ def parse_settings(settings, name): # {{{
 				for t in terms:
 					if '-' in t:
 						start, end = map(int, t.split('-'))
+						if default_players is None:
+							default_players = start
 						players.update(range(start, end + 1))
 					else:
+						if default_players is None:
+							default_players = int(t)
 						players.add(int(t))
 				if len(players) == 0:
 					ret['players'] = None
 					continue
 				num_players = list(players)
 				num_players.sort()
+			elif key == 'interface':
+				assert value.lower() in ('any', '2-d', '2d', '3-d', '3d')
+				if value.startswith('2'):
+					settings_use_3d = {False: True, True: False}
+				elif value.startswith('3'):
+					settings_use_3d = {False: False, True: True}
+				else:
+					settings_use_3d = {False: True, True: True}
 			else:
 				log('Warning: ignoring unknown key {} at global scope on line {}'.format(key, ln + 1))
 			continue	
@@ -494,6 +534,7 @@ def parse_settings(settings, name): # {{{
 				current['default'] = 0
 			elif value in ('select', 'radio'):
 				current['options'] = []
+				current['default'] = 0
 			elif value == 'checkbox':
 				current['default'] = False
 			else:
@@ -502,17 +543,17 @@ def parse_settings(settings, name): # {{{
 					current[key] = 'string'
 				default = ''
 		elif key == 'default':
-			if 'default' not in current:
-				log('Warning: ignoring default value for unknown or incompatible setting type on line {}'.format(ln + 1))
-				continue
 			if current['type'] == 'number':
 				current['default'] = int(value)
 			elif current['type'] == 'string':
 				current['default'] = value
-			else:
-				assert current['type'] == 'checkbox'
+			elif current['type'] == 'checkbox':
 				assert value.lower() in ('true', 'false')
 				current['default'] = value.lower() == 'true'
+			else:
+				assert current['type'] in ('radio', 'select')
+				current['default'] = value
+				current['options'].append(value)
 		elif key == 'option':
 			if 'options' not in current:
 				log('Warning: ignoring option for unknown or incompatible setting type on line {}'.format(ln + 1))
@@ -532,9 +573,11 @@ def parse_settings(settings, name): # {{{
 		s = {'key': 'players', 'name': _('Number of Players')}
 		ret.insert(1 if ret[0]['key'] == 'name' else 0, s)
 	s['options'] = num_players
+	s['default'] = default_players
+	allowed_players[gamename] = num_players
 	if 'type' not in s:
 		s['type'] = 'radio' if len(num_players) <= 5 else 'select'
-	return name, ret
+	return name, settings_use_3d, ret
 # }}}
 
 # Read info for all games. {{{
@@ -553,7 +596,7 @@ files.sort();
 games = {}
 for gamedir in files:
 	name = gamedir[1]
-	gamename, settings = parse_settings(open(os.path.join(gamedir[0], 'settings.txt')).read(), name.capitalize())
+	gamename, settings_use_3d, settings = parse_settings(open(os.path.join(gamedir[0], 'settings' + os.extsep + 'txt')).read(), name)
 	if settings is None:
 		log('skipping game {}, because the number of players is not defined in settings.txt'.format(name))
 		continue
@@ -592,6 +635,12 @@ for gamedir in files:
 			files = [f for f in os.listdir(dirname) if os.path.splitext(f)[1] not in fhs.get_config()['forbidden-exts']]
 			for required_suffix, forbidden_suffix, use_3d in (('', ('-2d', '-3d'), None), ('-2d', (), True), ('-3d', (), False)):
 				for f in files:
+					if f.startswith('.'):
+						# Ignore hidden files.
+						continue
+					if base in ('jta', 'gani') and not f.endswith(os.extsep + base):
+						# Don't use textures as models.
+						continue
 					if not os.path.splitext(f)[0].endswith(required_suffix):
 						# Wrong suffix for this loop iteration.
 						continue
@@ -635,36 +684,31 @@ for gamedir in files:
 				if p is not None:
 					loader[t].append({'type': base, 'object': objname, 'path': p['pathname']})
 
-	if not any(have_3d) or all(have_3d):
+	if settings_use_3d is None:
+		log('use 3d {}: {}'.format(gamename, have_3d))
+		if not any(have_3d.values()) or all(have_3d.values()):
+			use3d = None
+		elif have_3d[False]:
+			use3d = False
+		else:
+			use3d = True
+	elif settings_use_3d[False] and settings_use_3d[True]:
 		use3d = None
-	elif have_3d[False]:
-		use3d = False
 	else:
-		use3d = True
+		use3d = settings_use_3d[True]
 
 	js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
 	css = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'css') and not os.path.isdir(os.path.join(jssrc, x))]
+	scripts = ['games/{}/{}'.format(name, f) for f in js]
 	scripts.sort()
 	styles = ['games/{}/{}'.format(name, f) for f in css]
 	styles.sort()
 	# }}}
 
-	# Read game translations. {{{
-	translations[name] = {}
-	po_dir = os.path.join(gamedir[0], 'po')
-	if os.path.isdir(po_dir):
-		for po in os.listdir(po_dir):
-			filename = os.path.join(po_dir, po)
-			lang, ext = os.path.splitext(po)
-			if ext != os.extsep + 'po' or base.startswith('.') or not os.path.isfile(filename):
-				continue
-			if lang not in languages:
-				log("Warning: ignoring language {} for game {}, because it's not available for system strings".format(lang, name))
-				continue
-			translations[name][lang] = read_translation(filename)
-	# }}}
+	# Read game translations.
+	translations[name] = read_translation(name, os.path.join(gamedir[0], 'po'))
 
-	_settings[name]['name'] = name.capitalize() if not hasattr(games[name], 'name') else games[name].name
+	_settings[name]['name'] = gamename
 	_settings[name]['load3d'] = loader[True]
 	_settings[name]['load2d'] = loader[False]
 	_settings[name]['use_3d'] = use3d
@@ -772,6 +816,9 @@ class Instance: # Class for game instances. {{{
 		# Set up players.
 		if name != '':
 			num_players = settings['players']
+			if num_players not in allowed_players[gametype]:
+				log('Warning: invalid number of players {} requested for {} of {}. Falling back to {}.'.format(num_players, name, gametype, allowed_players[gametype][0]))
+				num_players = allowed_players[gametype][0]
 			title_game.game.Public.games[name] = [None] * num_players
 		else:
 			num_players = 0
@@ -1110,20 +1157,20 @@ class Connection: # {{{
 			if lang in languages:
 				break
 		else:
-			lang = None
+			lang = ''
 		# Inform about state.
 		self._socket.webgame.event('id', self._name, None)
-		self._socket.webgame.event('init', lang, languages, translations[None][lang] if lang is not None else {}, _settings)
+		self._socket.webgame.event('init', lang, languages, (translations[''][lang] if lang != '' else {}), _settings)
 		broadcast_shared(self, ['Public'], self._instance.game.Public)
 		broadcast_shared(self, ['Private'], None, title_game.game.Public.name)
 	def language(self, lang):
-		assert lang in translations[None]
+		assert lang in translations['']
 		if self._instance is None:
 			t = {}
 		else:
 			g = self._instance.gametype
 			t = translations[g].get(lang, {})
-		return translations[None][lang], t
+		return translations[''][lang], t
 	def _closed(self):
 		'''This is called by the server when the connection has closed.'''
 		if self._instance is not title_game:
