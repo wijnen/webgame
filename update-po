@@ -5,7 +5,7 @@
 cd "`dirname "$0"`"
 
 # Create javscript pot
-grep "class='translate'" html/webgame.html \
+grep -E "<title>|class='translate'" html/index.html \
 	| cut -f2 -d'>' \
 	| cut -f1 -d'<' \
 	| sed 's/"/\\\\"/g' \
@@ -15,17 +15,17 @@ grep "class='translate'" html/webgame.html \
 	| while read line ; do
 		echo 'console.info(_("'"$line"'"));'
 	done \
-	| xgettext --add-comments -LJavaScript - html/webgame.js -o po/javascript.pot
+	| xgettext --add-comments -LJavaScript - html/webgame.js -o webgame-po/javascript.pot
 
 # Create python pot
-xgettext --add-comments -LPython game webgame_client.py -o po/python.pot
+xgettext --add-comments -LPython webgame webgame_client.py -o webgame-po/python.pot
 
 # Merge pot files
-msgcat po/javascript.pot po/python.pot -o po/webgame.pot
+msgcat webgame-po/javascript.pot webgame-po/python.pot -o webgame-po/webgame.pot
 
 # Update translations.
-for lang in po/*.po ; do
-	msgmerge --update "$lang" po/webgame.pot
+for lang in webgame-po/*.po ; do
+	msgmerge --update "$lang" webgame-po/webgame.pot
 done
 
-rm po/javascript.pot po/python.pot po/webgame.pot
+rm webgame-po/javascript.pot webgame-po/python.pot webgame-po/webgame.pot

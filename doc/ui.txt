@@ -1,0 +1,51 @@
+Options for the UI:
+
+Most options can be either values or functions returning the value. Those
+functions are called with the node as "this", the current value of the Public
+or Private object as the first argument, and the indices of any counters as
+remaining arguments.
+
+options marked with (*) should be functions and cannot return their (function)
+value; they are called when the corresponding event triggers them.
+
+Always:
+	tag		- Used to determine if an object should move to a new location (same tag), or disappear and appear (different tags).
+	location	- Where the object is placed in 3-D space.
+	offset		- This is added to the location * the object index, for ease of building arrays of objects.
+	time		- Time for animation
+	visible		- If false, this object is hidden.
+	canvas (*)	- If set, a function called on creation to set up the canvas, which is the object.
+	text		- Text to write (as overlay) along the object.
+	class		- class, for using styles.
+	style		- direct style. Value is an object of style keys and values. Set by javascript, so e.g. use "className", not "class".
+	image		- background image of object; in 3-D, this causes a div overlay to be created.
+	size		- size of image or canvas. this is [world_w, world_h, pixels_w, pixels_h].
+	click (*)	- callback which is called when the object is clicked.
+	init (*)	- Called after the object is first created. Not called if an old object is reused (and moved).
+	update (*)	- Called when there is an update from the server. This is called a lot and should be fast.
+
+3-D only:
+	overlay	 - If this or "text" is defined, an overlay is created. Value is the location of the overlay relative to the object.
+	model		- jta model for this object.
+
+
+The above are items in the game.ui object. There are other functions in game,
+which are called for global events (as opposed to per-item events):
+
+	init2d(): game has loaded with 2-D interface.
+	init3d(): game has loaded with 3-D interface.
+	init(): game has loaded with any interface. This is called after init*d.
+	end(result): game has ended. Argument: return value of last task. Default implementation: print result in chat.
+	reply(result): this should be set to a callback just before calling server(). The reply to that call will be handled by that callback. It is automatically cleared after use. If not set, the server must return null (None) or else the return value is shown as an error to the user.
+	playercolor(player_num): returns color value (css string) for a player. This can be used to paint items in the proper colors, or it can be replaced to set alternative player colors for a game.
+	text_update(): Language has changed and texts should be updated.
+	update(): An update to Public or Private happened. Also called if language changed and text_update is not defined.
+	end_game(): The user returned to the title screen; game should be cleaned up.
+	new_game(): The user started the game; game should be set up.
+
+2-D only:
+	update_canvas(dom_2d_context): called when the canvas has changed (resized), to update the background.
+
+There are also some objects that are used:
+
+	viewport: visible part of space.

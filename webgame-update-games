@@ -19,7 +19,9 @@ Paths:
 
 import sys
 import os
+import time
 import subprocess
+import re
 import fhs
 from network import log
 config = fhs.init(help = 'Update all webgame games', version = '0.1', contact = 'Bas Wijnen <wijnen@debian.org>', packagename = 'webgame', game = True)
@@ -29,6 +31,33 @@ def run(cmd, input = None):
 		return subprocess.run(cmd, shell = True, close_fds = True, stdout = subprocess.PIPE).stdout
 	else:
 		return subprocess.run(cmd, shell = True, close_fds = True, input = input, stdout = subprocess.PIPE).stdout
+
+date = time.strftime('%F %H:%M%z').encode('utf-8')
+
+def xgettext(programming_language, sources, input = None, cd = False):
+	'''xgettext extracts strings from a source file and generates a pot file.'''
+	if cd:
+		assert len(sources) == 1
+		prefix = 'cd %s ; ' % os.path.dirname(sources[0])
+		filenames = os.path.basename(sources[0])
+	else:
+		prefix = ''
+		filenames = ' '.join(sources)
+	return run (prefix + 'xgettext ' +
+			'--add-comments ' +
+			'--from-code UTF-8 ' +
+			"--package-name '" + game.replace("'", r"\'") + "' " +
+			'-L ' + programming_language + ' ' +
+			('- ' if input is not None else '') +
+			filenames + ' ' +
+			'-o -',
+			input) \
+		.replace(b'\n"Content-Type: text/plain; charset=CHARSET\\n"\n', b'\n"Content-Type: text/plain; charset=UTF-8\\n"\n') \
+		.replace(b'\n"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n"\n', b'\n"PO-Revision-Date: ' + date + b'\\n"\n')
+
+# Prepare a temporary file named settings.txt so the path in the po file is correct.
+tmpdir = fhs.write_temp(dir = True)
+tmpsettingsfile = os.path.join(tmpdir, 'settings.txt')
 
 # Find all games.
 games = fhs.read_data('games', dir = True, multiple = True)
@@ -80,17 +109,18 @@ for gamesdir in games:
 			#log('skipping ' + game + ': hidden or special file')
 			continue
 
-		if not os.path.isdir(os.path.join(gamesdir, game)):
+		gamedir = os.path.join(gamesdir, game)
+		if not os.path.isdir(gamedir):
 			# Not a directory; ignore without message.
 			#log('skipping ' + game + ': not a directory')
 			continue
 
-		if not os.path.isfile(os.path.join(gamesdir, game, game + os.extsep + 'py')):
+		if not os.path.isfile(os.path.join(gamedir, game + os.extsep + 'py')):
 			log('skipping ' + game + ': no game file (needed: ' + game + os.extsep + 'py)')
 			continue
 
 		# Link html/ directory.
-		if not os.path.isdir(os.path.join(gamesdir, game, 'html')):
+		if not os.path.isdir(os.path.join(gamedir, 'html')):
 			log('skipping ' + game + ': no html directory')
 			continue
 
@@ -110,54 +140,41 @@ for gamesdir in games:
 		# Sources of translated strings in game files:
 		# - Python files (main game file and local modules)
 		# - javascript files
-		# Sources of translated strings in system files:
-		# - webgame
-		# - html/webgame.js
-		# game and system files go into separate po (and pot) files.
-		# The system strings have their own mo file.
-		# Every language has a single mo file per game.
-		# This code generates the mo files for the game strings.
+		# - settings.txt: name (top level for game name; others for settings names), description, option, default for strings?
+		# Note: settings are stored in pot (and po) files, but they are split into their own object in webgame.
 
-		# File locations:
-		# webgame po: system strings, in webgame data path.
-		# game po: game strings, in gamedir/po/lang.po
-		# game pot: generated on the fly; not stored.
-		# game mo: generated on the fly; not stored.
-		# game js: all resulting strings
-		# TODO.
+		podir = os.path.join(gamedir, 'po')
+		if not os.path.isdir(podir):
+			os.mkdir(podir)
+		# Create pot into a variable.
+		pyfiles = [os.path.join(gamedir, x) for x in os.listdir(gamedir) if x.endswith('.py') or x == 'ai']
+		jsfiles = [os.path.join(gamedir, 'html', x) for x in os.listdir(os.path.join(gamedir, 'html')) if x.endswith('.js')]
+		pypot = xgettext('Python', pyfiles)
+		jspot = xgettext("JavaScript", jsfiles)
+		settingsfile = os.path.join(gamedir, 'settings' + os.extsep + 'txt')
+		if os.path.isfile(settingsfile):
+			settings = open(settingsfile).read().replace('\\', '\\\\').replace('"', r'\"')
+			settings = re.sub(r'^[ \t]*(name|description|option)[ \t]*:[ \t]*(.*?)[ \t]*$', r'# Setting: \1\n_("\2")', settings, flags = re.M)
+			settings = re.sub(r'^([^_#\n])', r'#\1', settings, flags = re.M)
+			settings = re.sub(r'^(?=\n)', r'break()', settings, flags = re.M)	# break comment block so only last part is included in pot.
+			with open(tmpsettingsfile, 'w') as tmp:
+				tmp.write(settings)
+				tmp.flush()
+				settingspot = os.path.join(tmpdir, 'settings.pot')
+				with open(settingspot, 'wb') as p:
+					p.write(xgettext('Python', [tmpsettingsfile], cd = True))
+				jspot = run('msgcat %s - -o-' % settingspot, jspot)
+		else:
+			settings = None
+		pot = os.path.join(gamedir, 'po', game + os.extsep + 'pot')
+		with fhs.write_temp(text = False) as tmp:
+			tmp.write(pypot)
+			tmp.flush()
+			run('msgcat - %s -o%s' % (tmp.filename, pot), jspot)
 
-
-year = time.strftime('%Y').encode('utf-8')
-date = time.strftime('%F %H:%M%z').encode('utf-8')
-
-def xgettext(programming_language, sources, input = None):
-	'''xgettext extracts strings from a source file and generates a pot file.'''
-	return run ("xgettext --add-comments --from-code UTF-8 --package-name '" +
-			name.replace("'", r"\'") +
-			"' --msgid-bugs-address " + config['bugs'] +
-			' -L ' + programming_language +
-			' ' + ('- ' if input is not None else '') + ' '.join(sources) +
-			' -o -',
-			input) \
-		.replace(b'\n"Content-Type: text/plain; charset=CHARSET\\n"\n', b'\n"Content-Type: text/plain; charset=UTF-8\\n"\n') \
-		.replace(b'\n# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.\n', b'\n# ' + config['copyright'].encode('utf-8') + b', ' + year + b'.\n') \
-		.replace(b"\n# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER\n", b'\n# Copyright (C) ' + year + b' ' + config['copyright'].encode('utf-8') + b'\n') \
-		.replace(b'\n"Last-Translator: FULL NAME <EMAIL@ADDRESS>\\n"\n', b'\n"Last-Translator: ' + config['copyright'].encode('utf-8') + b'\\n"\n') \
-		.replace(b'\n"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n"\n', b'\n"PO-Revision-Date: ' + date + b'\\n"\n')
-
-# Create pot into a variable.
-name = config['name'] or os.path.basename(os.path.abspath(os.curdir)).capitalize()
-pyfiles = [x for x in os.listdir(os.curdir) if x.endswith('.py') or x == 'ai']
-jsfiles = [os.path.join('html', x) for x in os.listdir('html') if x.endswith('.js')]
-pypot = xgettext('Python', pyfiles)
-jspot = xgettext("JavaScript", jsfiles, ('// The language name of the translation, for the dropdown selection\nconsole.info(_("' + name.replace('"', '\\"') + '"), _("Language Name"));').encode('utf-8'))
-with fhs.write_temp(text = False) as tmp:
-	tmp.write(pypot)
-	tmp.flush()
-	pot = run('msgcat - %s -o-' % tmp.filename, jspot)
-
-# Run msgmerge for each translation. This updates the existing translation with the new pot.
-for f in os.listdir('po'):
-	if not f.endswith('.po'):
-		continue
-	run('msgmerge --quiet --lang %s -U %s -' % (os.path.splitext(f)[0], os.path.join('po', f)), pot)
+		# Run msgmerge for each translation. This updates the existing translation with the new pot.
+		for f in os.listdir(os.path.join(gamedir, 'po')):
+			if f.startswith('.') or not f.endswith('.po'):
+				continue
+			# Warn about translations which are not available in system -> this is done in webgame, because not all system translations may be foound here. (TODO: implement that in webgame.)
+			run('msgmerge --quiet --lang %s -U %s %s' % (os.path.splitext(f)[0], os.path.join(gamedir, 'po', f), pot))

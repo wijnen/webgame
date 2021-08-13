@@ -30,7 +30,14 @@ function server(target) { // {{{
 	var args = [];
 	for (var i = 1; i < arguments.length; ++i)
 		args.push(arguments[i]);
-	_webgame.server.call(target, args, {}, _webgame.server_reply);
+	var reply;
+	if (_webgame.current_reply !== undefined) {
+		reply = _webgame.current_reply;
+		delete _webgame.current_reply;
+	}
+	else
+		reply = _webgame.server_reply;
+	_webgame.server.call(target, args, {}, reply);
 } // }}}
 
 function set_state(value) { // {{{
@@ -38,20 +45,20 @@ function set_state(value) { // {{{
 } // }}}
 
 function _(message, force_args) {	// Support for translations. {{{
-	if (_webgame.translations !== undefined) {
-		if (_webgame.translations[_webgame.language] !== undefined && _webgame.translations[_webgame.language][message] !== undefined)
-			message = _webgame.translations[_webgame.language][message];
-		else {
-			// _webgame.languages is a list of languages, sorted by user preference.
-			for (var t = 0; t < _webgame.languages; ++t) {
-				l = _webgame.languages[t];
-				if (_webgame.translations[t] !== undefined && _webgame.translations[t][message] !== undefined) {
-					message = _webgame.translations[t][message];
-					break;
-				}
-			}
+	// Use translation. {{{
+	var types = ['system', 'game'];
+	var found = false;
+	for (var t = 0; t < types.length; ++t) {
+		var candidate = _webgame[types[t] + '_translations'][message];
+		if (candidate !== undefined) {
+			message = candidate;
+			found = true;
+			break;
 		}
-	}
+	} // }}}
+	if (!found && _webgame.language != '')
+		console.error('tag', message, 'was not translated');
+	// Apply substitutions. {{{
 	var parts = [''];
 	var substs = [];
 	while (message.length > 0) {
@@ -85,7 +92,7 @@ function _(message, force_args) {	// Support for translations. {{{
 			ret += parts[i + 1];
 		}
 		return ret;
-	};
+	}; // }}}
 } // }}}
 
 function handle_cursor(keycode) { // compute direction from keycode. {{{
@@ -340,7 +347,9 @@ var _webgame = { // {{{
 	title_gamelist: [],
 	canvas_list: [],
 	div_list: [],
-	translations: {},
+	language: '',
+	system_translations: {},
+	game_translations: {},
 	chat: show_chat,
 	ui: {},
 	removing: [],
@@ -574,6 +583,9 @@ _webgame.setup_mgrl = function() { // {{{
 	}
 	window.camera.activate();
 
+	// Set new window title.
+	document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), _(Public.name), _(_webgame.gametitle));
+
 	window.AddEvent('resize', _webgame.resize_window);
 	var events = ['keydown', 'keyup'];
 	for (var e = 0; e < events.length; ++e) {
@@ -613,8 +625,10 @@ _webgame.id = function(name, num) { // {{{
 	_webgame.update_url();
 }; // }}}
 
-_webgame.init = function(lang, languages, translations, settings) { // {{{
-	//console.info(lang, languages, translations, settings);
+_webgame.init = function(lang, languages, translations, settings, settings_translations) { // {{{
+	//console.info(lang, languages, translations, settings, settings_translations);
+	_webgame.system_translations = translations;
+	_webgame.settings_translations = settings_translations;
 	_webgame.games = settings;
 	_webgame.gamelist = [];
 	for (var g in _webgame.games)
@@ -631,16 +645,9 @@ _webgame.init = function(lang, languages, translations, settings) { // {{{
 		select.AddClass('hidden');
 	}
 	else {
-		for (var e in _webgame.languages) {
-			if (_webgame.languages[e] == '') {
-				var option = select.AddElement('option').AddText('English (source code)');
-				option.value = '';
-			}
-			else {
-				var translation = _webgame.translations[_webgame.languages[e]];
-				var name = translation['Language Name'];
-				select.AddElement('option').AddText(name + ' (' + _webgame.languages[e] + ')').value = _webgame.languages[e];
-			}
+		for (var e = 0; e < _webgame.languages.length; ++e) {
+			var code = _webgame.languages[e];
+			select.AddElement('option').AddText(languages[code] + ' (' + code + ')').value = code;
 		}
 	}
 	_webgame.set_language(lang);
@@ -676,6 +683,12 @@ _webgame.init = function(lang, languages, translations, settings) { // {{{
 	var games = [];
 	var settingstables = [];
 	_webgame.select_game = function() { // {{{
+		var gameselect = document.getElementById('gameselect');
+		var option = gameselect.options[gameselect.selectedIndex];
+		if (option.HaveClass('untranslated'))
+			gameselect.AddClass('untranslated');
+		else
+			gameselect.RemoveClass('untranslated');
 		for (var g = 0; g < games.length; ++g) {
 			if (games[g].selected) {
 				settingstables[g].style.display = '';
@@ -685,15 +698,14 @@ _webgame.init = function(lang, languages, translations, settings) { // {{{
 			}
 		}
 	} // }}}
-	for (var g = 0; g < _webgame.gamelist.length; ++g) {
-		var game = _webgame.games[_webgame.gamelist[g]];
-		select.AddElement('option').AddText(game.name);
-	}
 	var radiocount = 0;
+	_webgame.settingstranslatable = {};
 	for (var gamename in _webgame.games) {
+		_webgame.settingstranslatable[gamename] = [];
 		var table = gamesettings.AddElement('table');
 		settingstables.push(table);
-		var option = gameselect.AddElement('option').AddText(_webgame.games[gamename].name);
+		var option = gameselect.AddElement('option');
+		_webgame.settingstranslatable[gamename].push([option, _webgame.games[gamename].name]);
 		option.value = gamename;
 		games.push(option);
 		_webgame.new_settings[gamename] = {};
@@ -702,7 +714,7 @@ _webgame.init = function(lang, languages, translations, settings) { // {{{
 			var tr = table.AddElement('tr');
 			var name = tr.AddElement('td');
 			var value = tr.AddElement('td');
-			name.AddText(setting.name);
+			_webgame.settingstranslatable[gamename].push([name, setting.name]);
 			var key = (setting.key === undefined ? setting.name : setting.key);
 			console.assert(_webgame.new_settings[gamename][key] === undefined);
 			if (setting.desc !== undefined)
@@ -731,8 +743,12 @@ _webgame.init = function(lang, languages, translations, settings) { // {{{
 				if (setting.options.length == 1)
 					tr.AddClass('hidden');
 				for (var o = 0; o < setting.options.length; ++o) {
-					var option = setting.options[o];
-					select.AddElement('option').AddText(option);
+					var option = select.AddElement('option');
+					// Don't translate number-only (including empty) strings. Meant for excluding number of players.
+					if (!settings.options[o].match(/^\d*$/))
+						_webgame.settingstranslatable[gamename].push([option, setting.options[o]]);
+					else
+						option.AddText(setting.options[o]);
 				}
 				select.gamename = gamename;
 				select.key = key;
@@ -751,25 +767,59 @@ _webgame.init = function(lang, languages, translations, settings) { // {{{
 					var radio = label.AddElement('input');
 					radio.type = 'radio';
 					radio.name = 'webgameradio' + radiocount;
-					label.AddText(option);
+					var span = label.AddElement('span');
+					if (!String(option).match(/^\d*$/))
+						_webgame.settingstranslatable[gamename].push([span, option]);
+					else
+						span.AddText(option);
 					radio.gamename = gamename;
 					radio.key = key;
 					radio.retval = option;
 					radio.AddEvent('click', function() { _webgame.new_settings[this.gamename][this.key] = this.retval; });
 					if (setting['default'] == option || o == 0) {
 						radio.checked = true;
+						// Don't translate number-only (including empty) strings. Meant for excluding number of players.
 						_webgame.new_settings[gamename][key] = option;
 					}
 				}
 			}
 			else if (setting.type == 'checkbox') {
-				// TODO
+				var input = value.AddElement('input');
+				input.type = 'checkbox';
+				input.checked = !!setting['default'];
+				input.key = key;
+				input.gamename = gamename;
+				_webgame.new_settings[gamename][key] = input.checked;
+				input.AddEvent('change', function() { _webgame.new_settings[this.gamename][this.key] = this.checked; });
 			}
 		}
 	}
+	_webgame.update_settings_translations();
 	_webgame.select_game();
 	// }}}
 }; // }}}
+
+_webgame.update_settings_translations = function() {
+	for (var gamename in _webgame.games) {
+		for (var i = 0; i < _webgame.settingstranslatable[gamename].length; ++i) {
+			var obj_tag = _webgame.settingstranslatable[gamename][i];
+			var obj = obj_tag[0];
+			var tag = obj_tag[1];
+			var text = _webgame.settings_translations[gamename] === undefined ? undefined : _webgame.settings_translations[gamename][tag];
+			obj.RemoveClass('untranslated');
+			if (text === undefined) {
+				if (_webgame.system_translations[tag] !== undefined)
+					text = _webgame.system_translations[tag];
+				else {
+					text = tag;
+					if (_webgame.language != '')
+						obj.AddClass('untranslated');
+				}
+			}
+			obj.ClearAll().AddText(text);
+		}
+	}
+}
 
 _webgame.load_game = function(gametype, cb) { // {{{
 	current = gametype;
@@ -1059,22 +1109,28 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 }); // }}}
 
 _webgame.set_language = function(language) { // {{{
-	if (language == '')
-		language = undefined;
-	else if (_webgame.translations[language] === undefined) {
-		console.error(_('Attempting to set undefined language $1')(language));
-		return;
-	}
-	_webgame.language = language;
-	for (var e in _translatable)
-		for (var k = 0; k < _translatable[e].length; ++k)
-			_translatable[e][k].ClearAll().AddText(_(e));
-	_webgame.update_url();
+	_webgame.current_reply = function(reply) {
+		_webgame.language = reply[0];
+		_webgame.system_translations = reply[1];
+		_webgame.game_translations = reply[2];
+		_webgame.settings_translations = reply[3];
+		for (var e in _translatable)
+			for (var k = 0; k < _translatable[e].length; ++k)
+				_translatable[e][k].ClearAll().AddText(_(e));
+		_webgame.update_settings_translations();
+		_webgame.select_game();
+		if (current === null)
+			document.title = _(_webgame.gametitle);
+		else
+			document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), _(Public.name), _(_webgame.gametitle));
+		_webgame.update_url();
+	};
+	server('webgame', 'language', language);
 }; // }}}
 
 _webgame.select_language = function() { // {{{
-	var lang = document.getElementById('language_select').value;
-	_webgame.set_language(lang);
+	var select = document.getElementById('language_select');
+	_webgame.set_language(select.value);
 	if (Public === undefined || Public.name === undefined)
 		return;
 	if (Public.name == '') {
@@ -1098,12 +1154,6 @@ _webgame.chat_event = function(event) { // {{{
 _webgame.change_name = function() { // {{{
 	var name = document.getElementById('playername').value;
 	server('webgame', 'name', name);
-}; // }}}
-
-_webgame.change_gameselect = function() { // {{{
-	var gameselect = document.getElementById('gameselect');
-	var gamename = gameselect.options[gameselect.selectedIndex].value;
-	_webgame.select_game();
 }; // }}}
 
 // Commands triggered from buttons on website.
@@ -1141,7 +1191,7 @@ _webgame.finish = function(name, args) { // {{{
 	_webgame.transaction = undefined;
 	if (Public.name == '') {
 		// Title screen.
-		document.title = _webgame.gametitle;
+		document.title = _(_webgame.gametitle);
 		_webgame.game.AddClass('hidden');
 		// Clean up old game.
 		if (oldname != '' && game.end_game !== undefined) {
@@ -1381,7 +1431,7 @@ _webgame.finish = function(name, args) { // {{{
 				webgame.viewport = game.viewport;
 			please.renderer.overlay.RemoveClass('hidden');
 			_webgame.game.RemoveClass('hidden');
-			document.title = Public.name + '-' + Public.type;
+			document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), _(Public.name), _(_webgame.gametitle));
 			document.getElementById('gamename').ClearAll().AddText(Public.name);
 			if (window.camera !== undefined)
 				_webgame.resize_window();

@@ -109,8 +109,14 @@ cmds = {}
 _settings = {}
 
 # Translations of system strings.
-# Keys are language codes, values are dicts of source strings to translated strings.
+# Keys are gametypes, and '' for system. Values are dicts with language code keys, values of dicts of source strings to translated strings.
+# Example: translations['testgame']['nl']['Hello, World'] == 'Hallo, wereld!'
 translations = {}
+
+# Translations of game names and settings.
+# Keys are game types, values are lists of gametype strings. Translations are generated from the game's translations when they are sent to a player.
+# Example: settings_translations['testgame'] = ['Testgame', 'Node Type', 'Square', 'Triangle']
+settings_translations = {}
 
 # Allowed number of players, per game (each value is an array of ints).
 allowed_players = {'': [0]}
@@ -439,7 +445,7 @@ def read_translation(gamename, dirname = None): # {{{
 	'''
 	ret = {}
 	if gamename == '':
-		po_dirs = fhs.read_data('po', dir = True, multiple = True)
+		po_dirs = fhs.read_data('webgame-po', dir = True, multiple = True)
 	else:
 		po_dirs = (dirname,)
 	for po_dir in po_dirs:
@@ -463,20 +469,26 @@ def read_translation(gamename, dirname = None): # {{{
 			except:
 				log('Warning: translation could not be read from {}'.format(filename))
 				traceback.print_exc()
-				ret[lang] = {'Language Name': str(filename) + ' (translation file read error)'}
+				continue
 			terms = gettext.GNUTranslations()
 			terms._parse(io.BytesIO(data))
 			# Convert catalog to regular dict, just in case it wasn't.
 			terms = {k: v for k, v in terms._catalog.items()}
 			ret[lang] = terms
+			# Remove info node.
+			del ret[lang]['']
 	return ret
 
 # Read system translations.
+# Mark 'Language Name' as translatable, because it needs to be in the dictionary.
 translations[''] = read_translation('')
-languages = {code: translations[code].get('Language Name', str(code) + ' (untranslated)') for code in translations if code != ''}
+# Do not translate this literally, but write the name of the language as the translation.
+languages = {code: translations[''][code][_('Language Name')] for code in translations[''] if code != ''}
+languages[''] = 'English (source)'
 # }}}
 
 def parse_settings(settings, gamename): # {{{
+	settings_translations[gamename] = []
 	name = gamename.capitalize()
 	lines = settings.split('\n')
 	current = None
@@ -496,6 +508,7 @@ def parse_settings(settings, gamename): # {{{
 		if current is None:
 			if key == 'name':
 				name = value
+				settings_translations[gamename].append(value)
 			elif key == 'players':
 				players = set()
 				terms = value.split(',')
@@ -528,6 +541,7 @@ def parse_settings(settings, gamename): # {{{
 		# There is a current setting.
 		if key in ('name', 'description'):
 			current[key] = value
+			settings_translations[gamename].append(value)
 		elif key == 'type':
 			current[key] = value
 			if value == 'number':
@@ -558,6 +572,7 @@ def parse_settings(settings, gamename): # {{{
 			if 'options' not in current:
 				log('Warning: ignoring option for unknown or incompatible setting type on line {}'.format(ln + 1))
 				continue
+			settings_translations[gamename].append(value)
 			current['options'].append(value)
 		else:
 			log('Warning: ignoring unknown key {} on line {}'.format(key, ln + 1))
@@ -1144,6 +1159,7 @@ class Connection: # {{{
 		# Handle requested languages.
 		accept_languages = self._socket.data.get('accept-language')
 		accept = [] if accept_languages is None else [x.split(';')[0].replace('-', '_') for x in accept_language.split(',')]
+		log(accept)
 		language = socket.data['query'].get('language')
 		if language is not None:
 			if language in accept:
@@ -1158,19 +1174,13 @@ class Connection: # {{{
 				break
 		else:
 			lang = ''
+		log(languages)
+		log(lang)
 		# Inform about state.
 		self._socket.webgame.event('id', self._name, None)
-		self._socket.webgame.event('init', lang, languages, (translations[''][lang] if lang != '' else {}), _settings)
+		self._socket.webgame.event('init', lang, languages, (translations[''][lang] if lang != '' else {}), _settings, build_settings_translations(lang))
 		broadcast_shared(self, ['Public'], self._instance.game.Public)
 		broadcast_shared(self, ['Private'], None, title_game.game.Public.name)
-	def language(self, lang):
-		assert lang in translations['']
-		if self._instance is None:
-			t = {}
-		else:
-			g = self._instance.gametype
-			t = translations[g].get(lang, {})
-		return translations[''][lang], t
 	def _closed(self):
 		'''This is called by the server when the connection has closed.'''
 		if self._instance is not title_game:
@@ -1320,14 +1330,43 @@ class Title: # Class for title game object. {{{
 				continue
 # }}}
 
+def build_settings_translations(lang):
+	ret = {}
+	if lang == '':
+		# Source strings have no translations.
+		return ret
+	for gametype in settings_translations:
+		if gametype not in translations or lang not in translations[gametype]:
+			# If there is no translation (system strings) or language is not defined for this game: ignore.
+			continue
+		ret[gametype] = {}
+		for tag in settings_translations[gametype]:
+			ret[gametype][tag] = translations[gametype][lang][tag]
+	return ret
+
 def admin(args): # {{{
 	'''Function that is registered as a global command, so it is always available.
 	It handles the administrative commands: leaving the game, and name change.
 	'''
 	connection = args['connection']
 	cmd = args['args']
-	if len(cmd) < 1 or cmd[0] not in ('leave', 'name', 'claim', 'release', 'kick', 'chat', 'swap'):
+	if len(cmd) < 1 or cmd[0] not in ('language', 'leave', 'name', 'claim', 'release', 'kick', 'chat', 'swap'):
 		return _('invalid admin command')
+	if cmd[0] == 'language':
+		if len(cmd) < 2:
+			lang = ''
+		else:
+			lang = cmd[1]
+		if lang not in translations['']:
+			lang = ''
+		if lang == '':
+			return '', {}, {}, {}
+		if connection._instance is None:
+			t = {}
+		else:
+			g = connection._instance.gametype
+			t = translations[g].get(lang, {})
+		return lang, translations[''][lang], t, build_settings_translations(lang)
 	if cmd[0] == 'name':
 		if len(cmd) < 2:
 			name = 'Anonymous'
