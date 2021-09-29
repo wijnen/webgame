@@ -735,7 +735,9 @@ server = None
 
 class Player: # Class for player objects. {{{
 	'''This class is used for player objects.
-	All its attributes are set up and managed by the system, so it does not need any definitions here.
+	The only system attribute it has is connection, which is mostly for
+	internal use.  Other attributes can be added by the game. The object is
+	available as self.players from there (game.players from this file).
 	'''
 	def send(self, cmd, *args, **kwargs):
 		'''Send an event to the player's connection, if it has one.'''
@@ -857,8 +859,8 @@ class Instance: # Class for game instances. {{{
 				continue
 			admin({'connection': connections[c], 'args': ['leave']})
 		self.game.Public._die()
-		for p in self.game.players:
-			p.Private._die()
+		for p in self.game.Private:
+			p._die()
 		if self is not title_game:
 			del title_game.game.Public.games[self.game.Public.name]
 
@@ -889,7 +891,8 @@ class Instance: # Class for game instances. {{{
 						break
 				else:
 					return
-			task.reply = wake
+		# When called through RPC, wake argument(s) are passed through as the return value.
+		task.reply = wake
 		self.cleanup(task)
 		if len(task.queue_pending) > 0:
 			schedule(task, *task.queue_pending.pop(0))
@@ -915,10 +918,12 @@ class Instance: # Class for game instances. {{{
 		del self.game.reply
 		if hasattr(task, 'reply'):
 			if task.reply is not None:
+				# no reply was sent from the game; send None to notify the client that the command was received without error.
 				task.reply(None)
 			del task.reply
 		#log('cmd = {0}'.format(repr(cmd)))
 		if end_task[0] or cmd is None:
+			# Task died.
 			for t in task.waiters:
 				# task died and t wants to know. schedule notification.
 				schedule(t, end_task[1])
@@ -978,12 +983,12 @@ class Instance: # Class for game instances. {{{
 			who = tuple(range(len(self.game.players))) if pcmd[0] is None else pcmd[0]
 			for p in who:
 				if p not in prepare_actions:
-					prepare_actions[p] = {a: True for a in self.game.players[p].Private.actions}
+					prepare_actions[p] = {a: True for a in self.game.Private[p].actions}
 				if cmdname in prepare_actions[p]:
 					log('Error: action %s is already allowed for player %s (yield arg: %s)' % (cmdname, p, cmd))
 				prepare_actions[p][cmdname] = True
 		for p in prepare_actions:
-			self.game.players[p].Private.actions = prepare_actions[p]
+			self.game.Private[p].actions = prepare_actions[p]
 
 	def cleanup(self, task):
 		'''Remove task and clean up everything.
@@ -998,12 +1003,12 @@ class Instance: # Class for game instances. {{{
 			for p in who:
 				if not isinstance(p, Task):
 					if p not in prepare_actions:
-						prepare_actions[p] = {a: True for a in self.game.players[p].Private.actions if a}
-					#log(repr((prepare_actions[p], k, self.game.players[p].Private.actions)))
+						prepare_actions[p] = {a: True for a in self.game.Private[p].actions if a}
+					#log(repr((prepare_actions[p], k, self.game.Private[p].actions)))
 					del prepare_actions[p][k]
 			del self.cmds[k][task]
 		for p in prepare_actions:
-			self.game.players[p].Private.actions = prepare_actions[p]
+			self.game.Private[p].actions = prepare_actions[p]
 		if task in self.timeouts:
 			websocketd.remove_timeout(self.timeouts.pop(task))
 		if task.idle_pending is not None:
@@ -1029,9 +1034,9 @@ class Instance: # Class for game instances. {{{
 		'''Add a player to the game. This is only used when the game is started.'''
 		p = Player()
 		p.connection = None
-		p.Private = Shared_Object(['Private'], p, self.game.Public.name)
-		p.Private._live()
-		p.Private.actions = {}
+		self.game.Private.append(Shared_Object(['Private'], p, self.game.Public.name))
+		self.game.Private[-1]._live()
+		self.game.Private[-1].actions = {}
 		#log('appending {0}'.format(p))
 		self.game.players.append(p)
 		self.game.Public.players.append({'name': None})
@@ -1083,8 +1088,17 @@ class Instance: # Class for game instances. {{{
 
 	def parse_args(self, argdecl, cmd):
 		if argdecl is not None:
-			translation = {'i': int, 's': str, 'f': float, 'b': bool, '*': None}
-			argdecl = tuple(map(lambda x: translation[x], argdecl))
+			if isinstance(argdecl, str):
+				translation = {'i': int, 's': str, 'f': float, 'b': bool, '*': None}
+				argdecl = tuple(map(lambda x: (None, translation[x]), argdecl))
+			else:
+				assert isinstance(argdecl, (tuple, list))
+				for i, arg in enumerate(argdecl):
+					assert isinstance(arg, (tuple, list))
+					assert len(arg) == 2
+					assert isinstance(arg[0], str)	# When using named arguments; all of them must be named.
+					assert arg[1] in (int, str, float, bool, None)
+					# Nothing to do; argdecl is in the "decompressed" form.
 		if cmd is None:
 			return (None, argdecl)
 		if isinstance(cmd, int):
@@ -1097,22 +1111,31 @@ class Instance: # Class for game instances. {{{
 		if argdecl is None:
 			return True
 		# If the command exists and is valid for this player, but the arguments are wrong, notify player.
-		if len(ka) > 0:
-			return _('Function $1 called with keyword arguments: $2'), (repr(ka),)
-		if len(a) != len(argdecl):
-			return _('incorrect number of arguments to function $1 (given $2, expected $3)'), (len(a), len(argdecl))
-		if any(decl is not None and not isinstance(arg, decl) for arg, decl in zip(a, argdecl)):
+		if len(a) + len(ka) != len(argdecl):
+			return _('incorrect number of arguments to function $1 (given $2, expected $3)'), (len(a) + len(ka), len(argdecl))
+		used_kwargs = {a[0]: a[1] for a in argdecl[-len(ka):]}
+		if any(kwarg not in used_kwargs for kwarg in ka):
+			return _('invalid keyword argument(s) $2 given to function $1'), (', '.join(ka),)
+		if any(decl[1] is not None and not isinstance(arg, decl[1]) for arg, decl in zip(a, argdecl[:len(a)])):
 			return _('incorrect argument type given to function $1'), ()
+		if any(used_kwargs[arg] is not None and not isinstance(ka[arg], used_kwargs[arg]) for arg in ka):
+			return _('incorrect keyword argument type given to function $1'), ()
 		return True
 # }}}
 
-class Args(dict): # Class for command arguments; ordered dict. {{{
-	def __init__(self, a, ka):
-		for k in ka:
-			self[k] = ka[k]
+class Args(dict): # Class for command arguments; list plus keyword arguments. {{{
+	def __init__(self, a, ka, argdecl):
 		for i, v in enumerate(a):
 			self[i] = v
-		self.length = len(a)
+			if argdecl is not None and argdecl[i][0] is not None:
+				self[argdecl[i][0]] = v
+		if argdecl is None:
+			assert len(ka) == 0
+		else:
+			for i, k in enumerate(ka):
+				self[k] = ka[k]
+				self[len(a) + i] = ka[k]
+		self.length = len(a) + len(ka)
 	def __len__(self):
 		return self.length
 	def pop(self, idx = -1):
@@ -1233,7 +1256,7 @@ class Connection: # {{{
 						continue
 					if check is not True:
 						return check
-				args = {'args': Args(a, ka), 'connection': self, 'player': self._num, 'command': attr}
+				args = {'args': Args(a, ka, funcargs), 'connection': self, 'player': self._num, 'command': attr}
 				if who is not None and not isinstance(who, (tuple, list, set, frozenset)):
 					# Connection has requested to run a function. Schedule it.
 					websocketd.add_idle(lambda: wake(who(args)))
@@ -1299,7 +1322,7 @@ class Title: # Class for title game object. {{{
 				connection._socket.groups.add(cmd['args'][0])
 				connection._socket.webgame.event('id', connection._name, connection._num)
 				# Private must be sent before Public, because when Public.name is set, all shared variables must be available.
-				broadcast_shared(connection, ['Private'], connection._instance.game.players[connection._num].Private)
+				broadcast_shared(connection, ['Private'], connection._instance.game.Private[connection._num])
 				broadcast_shared(connection, ['Public'], connection._instance.game.Public)
 				instance.update_stats()
 			elif command == 'return':
@@ -1314,7 +1337,7 @@ class Title: # Class for title game object. {{{
 				connection._socket.groups.add(cmd['args'][0])
 				connection._instance.game.Public.players[connection._num].name = connection._name
 				instance.update_stats()
-				broadcast_shared(connection, ['Private'], connection._instance.game.players[connection._num].Private)
+				broadcast_shared(connection, ['Private'], connection._instance.game.Private[connection._num])
 				broadcast_shared(connection, ['Public'], connection._instance.game.Public)
 				instance.update_stats()
 			elif command == 'view':
@@ -1457,7 +1480,7 @@ def admin(args): # {{{
 		for target, num in zip((src, dst), (srcnum, dstnum)):
 			if target.connection is not None:
 				target.connection._socket.webgame.event('id', target.connection._name, num)
-				broadcast_shared(target.connection, ['Private'], target.Private)
+				broadcast_shared(target.connection, ['Private'], the_game.Private[num])
 				the_game.Public.players[num].name = target.connection._name
 			else:
 				the_game.Public.players[num].name = None
