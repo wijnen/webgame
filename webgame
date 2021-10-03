@@ -500,7 +500,11 @@ def parse_settings(settings, gamename): # {{{
 		# Ignore empty lines and comments.
 		if line.strip() == '' or line.strip().startswith('#'):
 			continue
-		key, value = map(str.strip, line.split(':', 1))
+		try:
+			key, value = map(str.strip, line.split(':', 1))
+		except ValueError:
+			log('Warning: ignoring invalid settings line for %s: %s' % (gamename, line))
+			continue
 		if key == 'setting':
 			current = {'key': value}
 			ret.append(current)
@@ -830,6 +834,7 @@ class Instance: # Class for game instances. {{{
 		self.game.Public.type = gametype
 		self.game.Public.players = []
 		self.game.Public.viewers = []
+		self.game.Private = []	# Filled in add_player.
 		# Set up players.
 		if name != '':
 			num_players = settings['players']
@@ -1290,7 +1295,7 @@ class Title: # Class for title game object. {{{
 				continue
 			if command == 'new':
 				if len(cmd['args']) < 2:
-					connection._instance.game.reply(_('no game name specified'))
+					connection._instance.game.reply(_('no game type specified'))
 					continue
 				gametype = cmd['args'].pop(0)
 				if gametype not in games:

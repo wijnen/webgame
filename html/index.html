@@ -43,10 +43,10 @@
 				<p>
 					Owner: <span id='owner'></span>
 					<span id='noowner' class='translate'>None</span>
-					<button id='claim' type='button' onclick='game("webgame", "claim")' class='translate'>Claim</button>
-					<button id='release' type='button' onclick='game("webgame", "release")' class='translate'>Release</button>
+					<button id='claim' type='button' onclick='server("webgame", "claim")' class='translate'>Claim</button>
+					<button id='release' type='button' onclick='server("webgame", "release")' class='translate'>Release</button>
 				</p>
-				<button id='leave' type='button' onclick='game("webgame", "leave")' class='translate'>Leave</button>
+				<button id='leave' type='button' onclick='server("webgame", "leave")' class='translate'>Leave</button>
 				<h4 class='translate'>Players</h4>
 				<table id='players'></table>
 				<div id='viewersdiv'>
@@ -83,7 +83,7 @@
 			</div>
 			<div id='handle'></div>
 			<div id='chat'>
-				<button type='button' onclick='game("webgame", "next")' id='next' class='translate'>Next</button>
+				<button type='button' onclick='server("webgame", "next")' id='next' class='translate'>Next</button>
 				<div id='chatter'></div>
 				<input type='text' onkeydown='_webgame.chat_event(event)'/>
 			</div>

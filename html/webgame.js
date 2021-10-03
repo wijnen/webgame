@@ -717,8 +717,8 @@ _webgame.init = function(lang, languages, translations, settings, settings_trans
 			_webgame.settingstranslatable[gamename].push([name, setting.name]);
 			var key = (setting.key === undefined ? setting.name : setting.key);
 			console.assert(_webgame.new_settings[gamename][key] === undefined);
-			if (setting.desc !== undefined)
-				name.title = setting.desc;
+			if (setting.description !== undefined)
+				tr.title = setting.description;
 			if (setting.type == 'number') {
 				var input = value.AddElement('input');
 				input.type = 'number';
@@ -745,7 +745,7 @@ _webgame.init = function(lang, languages, translations, settings, settings_trans
 				for (var o = 0; o < setting.options.length; ++o) {
 					var option = select.AddElement('option');
 					// Don't translate number-only (including empty) strings. Meant for excluding number of players.
-					if (!settings.options[o].match(/^\d*$/))
+					if (typeof setting.options[o] == 'string' && !setting.options[o].match(/^\d*$/))
 						_webgame.settingstranslatable[gamename].push([option, setting.options[o]]);
 					else
 						option.AddText(setting.options[o]);
@@ -1194,20 +1194,15 @@ _webgame.finish = function(name, args) { // {{{
 		document.title = _(_webgame.gametitle);
 		_webgame.game.AddClass('hidden');
 		// Clean up old game.
-		if (oldname != '' && game.end_game !== undefined) {
+		if (oldname != '') {
 			for (var key in _webgame.ui) {
 				var list = _webgame.ui[key];
-				for (var num = 0; num < list.length; ++num) {
-					if (list[num].node !== undefined) {
-						if (list[num].node.context !== undefined)
-							del_canvas(list[num].node);
-						else
-							del_div(list[num].node);
-					}
-				}
+				_webgame.recursive_remove(list);
 			}
+			_webgame.clean_removing();
 			_webgame.ui = {};
-			game.end_game();
+			if (game.end_game !== undefined)
+				game.end_game();
 		}
 		// Show title screen.
 		var games = [];
@@ -1474,6 +1469,15 @@ _webgame.remove_node = function(target) { // {{{
 	delete target.node;
 }; // }}}
 
+_webgame.recursive_remove = function(tree) { // {{{
+	if (tree.constructor == Array) {
+		for (var i = 0; i < tree.length; ++i)
+			_webgame.recursive_remove(tree[i]);
+		return;
+	}
+	_webgame.remove_node(tree);
+}; // }}}
+
 _webgame.update_ui = function() { // {{{
 	// Attributes for ui objects:
 	// path		Where the backing object is, or null if there is none.
@@ -1487,18 +1491,10 @@ _webgame.update_ui = function() { // {{{
 	// update	Called at every update.
 	// size		Size of the div (world_w, world_h, pixel_w, pixel_h)
 	// visible	If false, object is hidden.
-	var recursive_remove = function(tree) {
-		if (tree.constructor == Array) {
-			for (var i = 0; i < tree.length; ++i)
-				recursive_remove(tree[i]);
-			return;
-		}
-		_webgame.remove_node(tree);
-	};
 	var make_sources = function(sources, pathstr, base_src, base_target, path, pos, idx) {
 		for (var currentpos = pos; currentpos < path.length; ++currentpos) {
 			if (base_src === undefined || base_src === null) {
-				recursive_remove(base_target);
+				_webgame.recursive_remove(base_target);
 				return;
 			}
 			var key = path[currentpos];
@@ -1515,7 +1511,7 @@ _webgame.update_ui = function() { // {{{
 				}
 				while (base_target.length > count) {
 					// Source has disappeared; remove target.
-					recursive_remove(base_target.pop());
+					_webgame.recursive_remove(base_target.pop());
 				}
 				while (base_target.length < count) {
 					// Source has appeared; add target.
@@ -1556,6 +1552,9 @@ _webgame.update_ui = function() { // {{{
 	}
 	while (_webgame.prepare_update.length > 0)
 		_webgame.prepare_update.pop()();
+}; // }}}
+
+_webgame.clean_removing = function() { // {{{
 	while (_webgame.removing.length > 0) {
 		if (webgame.use_3d) {
 			var node = _webgame.removing.pop();
@@ -1567,7 +1566,11 @@ _webgame.update_ui = function() { // {{{
 		}
 		else {
 			var node = _webgame.removing.pop();
-			if (node !== undefined)
+			if (node.overlay !== undefined) {
+				please.overlay.remove_element(node.overlay.div);
+				node.overlay.destroy();
+			}
+			if (node.canvas !== undefined)
 				del_canvas(node);
 			else
 				del_div(node);
@@ -1628,8 +1631,9 @@ _webgame.handle_ui = function(key, data) { // {{{
 					console.error('incorrect offset value for', key, '; should be array of', data.idx.length, 'arrays of 3 coordinates, not:', offset);
 			}
 			var the_location = get_value('location');
-			if (the_location === undefined)
+			if (the_location === undefined) {
 				the_location = [0, 0, 0];
+			}
 			for (var i = 0; i < 3; ++i) {
 				loc.push(the_location[i]);
 				if (offset !== undefined) {
@@ -1683,12 +1687,24 @@ _webgame.handle_ui = function(key, data) { // {{{
 				if (overlay !== undefined)
 					target.location = overlay;
 			}
-			else
+			else {
 				target = data.target.node;
+				var overlay = get_value('overlay');
+				if (overlay !== undefined) {
+					target.overlay.location = overlay;
+					console.info(target.location, target.overlay.location);
+				}
+			}
 			if (target !== undefined) {
-				var text = get_value('text');
-				if (text !== undefined)
-					target.div.ClearAll().AddText(text);
+				var html = get_value('html');
+				if (html !== undefined) {
+					target.div.innerHTML = html;
+				}
+				else {
+					var text = get_value('text');
+					if (text !== undefined)
+						target.div.ClearAll().AddText(text);
+				}
 				var className = get_value('class');
 				if (className !== undefined) {
 					if (typeof className == 'string')
@@ -1749,6 +1765,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 					node.classes = {};
 					node.div = please.overlay.new_element();
 					node.div.bind_to_node(node);
+					graph.add(node);
 					node.div.AddEvent('click', function(event) {
 						if (!node.selectable)
 							return;
@@ -1769,6 +1786,14 @@ _webgame.handle_ui = function(key, data) { // {{{
 				}
 				data.target.node.key = key;
 				data.target.node.idx = data.idx;
+				var overlay = get_value('overlay');
+				var text = get_value('text');
+				var html = get_value('html');
+				if (overlay !== undefined || text !== undefined || html !== undefined) {
+					data.target.node.overlay = create_div();
+					data.target.node.add(data.target.node.overlay);
+					data.target.node.overlay.location = compute_location();
+				}
 				if (obj.click !== undefined) {
 					data.target.node.selectable = true;
 					data.target.node.on_click = function(event) {
@@ -1788,8 +1813,8 @@ _webgame.handle_ui = function(key, data) { // {{{
 					// If overlay or text is also defined, add an overlay.
 					// If size is defined, but not model, create a rectangle.
 					var model = get_value('model');
-					var overlay = get_value('overlay');
 					var text = get_value('text');
+					var html = get_value('html');
 					if (model !== undefined) {
 						data.target.node = model;
 					}
@@ -1815,15 +1840,16 @@ _webgame.handle_ui = function(key, data) { // {{{
 							}
 						}
 						else {
-							dbg('no model or size defined for', key, data.idx);
-							return;
+							//dbg('no model or size defined for', key, data.idx);
+							data.target.node = new please.GraphNode();
 						}
 					}
-					if (overlay !== undefined || text !== undefined) {
+					graph.add(data.target.node);
+					var overlay = get_value('overlay');
+					if (overlay !== undefined || text !== undefined || html !== undefined) {
 						data.target.node.overlay = create_div();
 						data.target.node.add(data.target.node.overlay);
 					}
-					graph.add(data.target.node);
 					data.target.node.location = compute_location();
 					data.target.node.key = key;
 					data.target.node.idx = data.idx;
