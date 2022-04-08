@@ -799,7 +799,7 @@ _webgame.init = function(lang, languages, translations, settings, settings_trans
 	// }}}
 }; // }}}
 
-_webgame.update_settings_translations = function() {
+_webgame.update_settings_translations = function() { // {{{
 	for (var gamename in _webgame.games) {
 		for (var i = 0; i < _webgame.settingstranslatable[gamename].length; ++i) {
 			var obj_tag = _webgame.settingstranslatable[gamename][i];
@@ -819,7 +819,7 @@ _webgame.update_settings_translations = function() {
 			obj.ClearAll().AddText(text);
 		}
 	}
-}
+} // }}}
 
 _webgame.load_game = function(gametype, cb) { // {{{
 	current = gametype;
@@ -1189,7 +1189,7 @@ _webgame.finish = function(name, args) { // {{{
 	var oldname = _webgame.transaction.Public[0].name;
 	var transaction = _webgame.transaction;
 	_webgame.transaction = undefined;
-	if (Public.name == '') {
+	if (Public.name == '') { // {{{
 		// Title screen.
 		document.title = _(_webgame.gametitle);
 		_webgame.game.AddClass('hidden');
@@ -1275,8 +1275,8 @@ _webgame.finish = function(name, args) { // {{{
 			please.renderer.overlay.AddClass('hidden');
 		_webgame.loading(false);
 		return;
-	}
-	var finish_update = function() {
+	} // }}}
+	var finish_update = function() { // {{{
 		if (Public.demo)
 			_webgame.body.AddClass('demo');
 		else
@@ -1414,8 +1414,9 @@ _webgame.finish = function(name, args) { // {{{
 				game.update.apply(game, args);
 			}
 		}
-	}
-	if (oldname == '') {
+		_webgame.clean_removing();
+	} // }}}
+	if (oldname == '') { // {{{
 		// Hide the titlescreen.
 		_webgame.titlescreen.AddClass('hidden');
 		_webgame.mainscreen.RemoveClass('hidden');
@@ -1437,7 +1438,7 @@ _webgame.finish = function(name, args) { // {{{
 			finish_update();
 			_webgame.loading(false);
 		});
-	}
+	} // }}}
 	else
 		finish_update();
 }; // }}}
@@ -1491,7 +1492,8 @@ _webgame.update_ui = function() { // {{{
 	// update	Called at every update.
 	// size		Size of the div (world_w, world_h, pixel_w, pixel_h)
 	// visible	If false, object is hidden.
-	var make_sources = function(sources, pathstr, base_src, base_target, path, pos, idx) {
+
+	var make_sources = function(sources, pathstr, base_src, base_target, path, pos, idx) { // {{{
 		for (var currentpos = pos; currentpos < path.length; ++currentpos) {
 			if (base_src === undefined || base_src === null) {
 				_webgame.recursive_remove(base_target);
@@ -1529,7 +1531,7 @@ _webgame.update_ui = function() { // {{{
 		if (base_target.length == 0)
 			base_target.push({});
 		sources.push({key: pathstr, source: base_src, target: base_target[0], idx: _webgame.deepcopy(idx)});
-	};
+	}; // }}}
 	for (var key in game.ui) {
 		var obj = game.ui[key];
 		var path = key.split('.');
