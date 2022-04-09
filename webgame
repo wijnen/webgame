@@ -1369,7 +1369,11 @@ def build_settings_translations(lang):
 			continue
 		ret[gametype] = {}
 		for tag in settings_translations[gametype]:
-			ret[gametype][tag] = translations[gametype][lang][tag]
+			try:
+				ret[gametype][tag] = translations[gametype][lang][tag]
+			except:
+				log('Warning: translation for settings string %s of game %s into language %s was expected, but not found.' % (tag, gametype, lang))
+				continue
 	return ret
 
 def admin(args): # {{{

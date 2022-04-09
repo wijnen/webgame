@@ -629,6 +629,16 @@ _webgame.init = function(lang, languages, translations, settings, settings_trans
 	//console.info(lang, languages, translations, settings, settings_translations);
 	_webgame.system_translations = translations;
 	_webgame.settings_translations = settings_translations;
+	// If a single game was requested and that game exists, ignore all other games.
+	if (webgame.args.game !== undefined && settings[webgame.args.game] !== undefined) {
+		var obj = {};
+		obj[webgame.args.game] = settings[webgame.args.game];
+		settings = obj;
+		obj = {};
+		obj[webgame.args.game] = settings_translations[webgame.args.game];
+		settings_translations = obj;
+	}
+
 	_webgame.games = settings;
 	_webgame.gamelist = [];
 	for (var g in _webgame.games)
