@@ -1738,9 +1738,17 @@ _webgame.handle_ui = function(key, data) { // {{{
 					}
 				}
 				var style = get_value('style');
+				for (var s in target.style_keys) {
+					if (style === undefined || style[s] === undefined) {
+						target.div.style[s] = '';
+						delete target.style_keys[s];
+					}
+				}
 				if (style !== undefined) {
-					for (var s in style)
+					for (var s in style) {
 						target.div.style[s] = style[s];
+						target.style_keys[s] = true;
+					}
 				}
 				var image = get_value('image');
 				if (image !== undefined && image !== null)
@@ -1790,6 +1798,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 				data.target.node = use_removed(tag, key);
 				if (data.target.node === null) {
 					data.target.node = create_div();
+					data.target.node.style_keys = {};
 					data.target.node.location = compute_location();
 				}
 				else {
@@ -1860,6 +1869,7 @@ _webgame.handle_ui = function(key, data) { // {{{
 					var overlay = get_value('overlay');
 					if (overlay !== undefined || text !== undefined || html !== undefined) {
 						data.target.node.overlay = create_div();
+						dtaa.target.node.overlay.style_keys = {};
 						data.target.node.add(data.target.node.overlay);
 					}
 					data.target.node.location = compute_location();
