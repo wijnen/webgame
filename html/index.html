@@ -29,7 +29,7 @@
 				<select id='language_select' onchange='_webgame.select_language();'>
 				</select>
 			</p>
-			<p>
+			<p id='interface_selector'>
 				<span class='translate'>Interface Preference:</span>
 				<select id='dimensionselect'>
 					<option id='d2d' class='translate'>2-D</option>
@@ -41,7 +41,7 @@
 				<hr/>
 				<h3 id='gamename'></h3>
 				<p>
-					Owner: <span id='owner'></span>
+					<span class='translate'>Owner:</span> <span id='owner'></span>
 					<span id='noowner' class='translate'>None</span>
 					<button id='claim' type='button' onclick='server("webgame", "claim")' class='translate'>Claim</button>
 					<button id='release' type='button' onclick='server("webgame", "release")' class='translate'>Release</button>

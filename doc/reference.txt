@@ -1,3 +1,5 @@
+# This information is outdated. It will be removed or rewritten.
+
 # Reference for webgame gpy files
 
 ## Globals defined by game, used by the system:

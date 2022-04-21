@@ -60,7 +60,7 @@ tmpdir = fhs.write_temp(dir = True)
 tmpsettingsfile = os.path.join(tmpdir, 'settings.txt')
 
 # Find all games.
-games = fhs.read_data('games', dir = True, multiple = True)
+games = fhs.read_data('webgames', dir = True, multiple = True)
 log('Found possible games locations: ' + '; '.join(games))
 
 for gamesdir in games:
@@ -81,10 +81,10 @@ for gamesdir in games:
 		except PermissionError:
 			log('insufficient permissions to create html link for ' + gamesdir + '; skipping')
 			continue
-	target = os.path.join(targetdir, 'games')
+	target = os.path.join(targetdir, 'webgames')
 	if not os.path.exists(target):
 		try:
-			os.symlink(os.path.join(os.pardir, 'games', 'html'), target)
+			os.symlink(os.path.join(os.pardir, 'webgames', 'html'), target)
 		except PermissionError:
 			log('insufficient permissions to update html link for ' + gamesdir + '; skipping')
 			continue

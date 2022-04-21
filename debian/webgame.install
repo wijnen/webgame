@@ -1,0 +1,8 @@
+html/webgame.css /usr/share/webgame/html
+html/index.html /usr/share/webgame/html
+html/webgame.js /usr/share/webgame/html
+webgame-po/nl.po /usr/share/webgame/webgame-po
+doc/yield.md /usr/share/doc/webgame
+doc/ui.txt /usr/share/doc/webgame
+webgame /usr/games
+webgame-update-games /usr/games

@@ -1,15 +1,15 @@
 #!/usr/bin/make -f
 
-export PYBUILD_NAME = webgame
-
 %:
-	dh $@ --with python3 --buildsystem pybuild
+	${MAKE} noinstall
+	dh $@ --with python3
 
 override_dh_auto_install:
 	dh_auto_install
+	mkdir -p debian/webgame/usr/share/webgame/webgames
 	# Copy external sources into the package.
 	# They should really be packaged separately.
-	mkdir -p debian/python3-webgame/usr/share/python3-webgame/html
-	cp -L html/mgrl.js html/gl-matrix.js debian/python3-webgame/usr/share/python3-webgame/html/
-	cd debian/python3-webgame/usr/share/python3-webgame/html ; ln -s ../../python3-websocketd/rpc.js .
-	cd debian/python3-webgame/usr/share/python3-webgame/html ; ln -s ../../python3-websocketd/builders.js .
+	mkdir debian/webgame/usr/share/webgame/html
+	cp -L html/mgrl.js html/gl-matrix.js debian/webgame/usr/share/webgame/html/
+	cd debian/webgame/usr/share/webgame/html ; ln -s ../../python3-websocketd/rpc.js .
+	cd debian/webgame/usr/share/webgame/html ; ln -s ../../python3-websocketd/builders.js .

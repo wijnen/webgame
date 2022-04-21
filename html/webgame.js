@@ -114,6 +114,21 @@ function watch(path, cb) { // {{{
 		_webgame.watchlist.push([path, cb]);
 } // }}}
 
+function unwatch(path) { // {{{
+	outer: for (var i = 0; i < _webgame.watchlist.length; ++i) {
+		var target = _webgame.watchlist[i][0];
+		if (target.length != path.length)
+			continue;
+		for (var p = 0; p < target.length; ++p) {
+			if (target[p] != path[p])
+				continue outer;
+		}
+		_webgame.watchlist.splice(i, 1);
+		return;
+	}
+	console.error('Unwatch called on path that is not being watched:', path);
+} // }}}
+
 function watch_object(path, add_cb, remove_cb, change_cb) { // {{{
 	// Call add for initial attributes.
 	var target = (path[0] == 'Public' ? Public : Private);
@@ -393,13 +408,13 @@ window.AddEvent('load', function() { // {{{
 	_webgame.body = document.getElementsByTagName('body')[0];
 	_webgame.state = document.getElementById('state');
 	// Set up translations.
-	window._translatable = {};
+	_webgame.translatable = {};
 	var elements = document.getElementsByClassName('translate');
 	for (var e = 0; e < elements.length; ++e) {
 		var tag = elements[e].textContent;
-		if (_translatable[tag] === undefined)
-			_translatable[tag] = [];
-		_translatable[tag].push(elements[e]);
+		if (_webgame.translatable[tag] === undefined)
+			_webgame.translatable[tag] = [];
+		_webgame.translatable[tag].push(elements[e]);
 	}
 	Public = { state: '', name: '' };
 	Private = { state: '' };
@@ -410,14 +425,15 @@ window.AddEvent('load', function() { // {{{
 			var args = [];
 			for (var a = 1; a < arguments.length; ++a)
 				args.push(arguments[a]);
+			//console.info(name, args);
 			_webgame[name].apply(_webgame, args);
 		},
 		'': function() {
+			var name = arguments[0];
 			if (current === null) {
 				show_chat(_('Error: server calls $1 during title game')(name));
 				return;
 			}
-			var name = arguments[0];
 			var args = [];
 			for (var a = 1; a < arguments.length; ++a)
 				args.push(arguments[a]);
@@ -584,10 +600,10 @@ _webgame.setup_mgrl = function() { // {{{
 	window.camera.activate();
 
 	// Set new window title.
-	document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), _(Public.name), _(_webgame.gametitle));
+	document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), Public.name, _(_webgame.gametitle));
 
 	window.AddEvent('resize', _webgame.resize_window);
-	var events = ['keydown', 'keyup'];
+	var events = ['keydown', 'keyup', 'keypress'];
 	for (var e = 0; e < events.length; ++e) {
 		if ((!webgame.use_3d && game[events[e] + '2d'] !== undefined) || (webgame.use_3d && game[events[e] + '3d'] !== undefined) || game[events[e]] !== undefined) {
 			window.AddEvent(events[e], function(event) {
@@ -625,10 +641,29 @@ _webgame.id = function(name, num) { // {{{
 	_webgame.update_url();
 }; // }}}
 
+_webgame.translations = function(lang, system_translations, game_translations, settings_translations) { // {{{
+	//console.info('setting new translations');
+	_webgame.language = lang;
+	_webgame.system_translations = system_translations;
+	_webgame.game_translations = game_translations;
+	_webgame.settings_translations = settings_translations;
+	for (var e in _webgame.translatable)
+		for (var k = 0; k < _webgame.translatable[e].length; ++k)
+			_webgame.translatable[e][k].ClearAll().AddText(_(e));
+	_webgame.update_settings_translations();
+	_webgame.select_game();
+	if (current === null)
+		document.title = _(_webgame.gametitle);
+	else
+		document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), Public.name, _(_webgame.gametitle));
+	_webgame.update_url();
+}; // }}}
+
 _webgame.init = function(lang, languages, translations, settings, settings_translations) { // {{{
 	//console.info(lang, languages, translations, settings, settings_translations);
 	_webgame.system_translations = translations;
 	_webgame.settings_translations = settings_translations;
+
 	// If a single game was requested and that game exists, ignore all other games.
 	if (webgame.args.game !== undefined && settings[webgame.args.game] !== undefined) {
 		var obj = {};
@@ -644,6 +679,20 @@ _webgame.init = function(lang, languages, translations, settings, settings_trans
 	for (var g in _webgame.games)
 		_webgame.gamelist.push(g);
 	_webgame.gamelist.sort();
+
+	// If there is only one dimension setting for all games, don't show the selector.
+	var have_dimension = [false, false];
+	for (var game in settings) {
+		if (_webgame.games[game].use_3d === null)
+			have_dimension = [true, true];
+		else
+			have_dimension[_webgame.games[game].use_3d] = true;
+		if (have_dimension[0] && have_dimension[1])
+			break;
+	}
+	if (!have_dimension[0] || !have_dimension[1])
+		document.getElementById('interface_selector').AddClass('hidden');
+
 	// Set up language select. {{{
 	_webgame.languages = [];
 	for (var language in languages)
@@ -657,7 +706,10 @@ _webgame.init = function(lang, languages, translations, settings, settings_trans
 	else {
 		for (var e = 0; e < _webgame.languages.length; ++e) {
 			var code = _webgame.languages[e];
-			select.AddElement('option').AddText(languages[code] + ' (' + code + ')').value = code;
+			var option = select.AddElement('option').AddText(languages[code] + (code == '' ? '' : ' (' + code + ')'));
+			option.value = code;
+			if (lang == code)
+				option.selected = true;
 		}
 	}
 	_webgame.set_language(lang);
@@ -837,6 +889,7 @@ _webgame.load_game = function(gametype, cb) { // {{{
 		// TODO: some things from setup need to be done.
 		// TODO: unload old game.
 		cb();
+		_webgame.server.unlock();
 		return;
 	}
 	_webgame.loaded[current] = true;
@@ -869,7 +922,7 @@ _webgame.load_game = function(gametype, cb) { // {{{
 	// Set search paths.
 	var paths = ['img', 'jta', 'gani', 'audio', 'glsl', 'text'];
 	for (var i = 0; i < paths.length; ++i)
-		please.set_search_path(paths[i], 'games/' + current + '/');
+		please.set_search_path(paths[i], 'webgames/' + current + '/');
 	var list, other;
 	if (webgame.use_3d) {
 		list = 'load3d';
@@ -902,7 +955,8 @@ _webgame.load_game = function(gametype, cb) { // {{{
 		_webgame._game[current].files[asset.type].push([asset.object, asset.path]);
 		loading = 1;	// Set to 1 if at least 1 file is loaded.
 		//console.info('loading', asset.path);
-		please.load(asset.path, undefined, (asset.type == 'jta' || asset.type == 'gani' ? {search_paths: {img: 'games/' + current + '/' + asset.path.replace(/^(.*)\/.*?$/, '$1')}} : undefined));
+		var search_path = asset.type == 'jta' || asset.type == 'gani' ? {search_paths: {img: 'webgames/' + current + '/' + asset.path.replace(/^(.*)\/.*?$/, '$1')}} : undefined;
+		please.load(asset.path, undefined, search_path);
 	}
 
 	var head = document.getElementsByTagName('head')[0];
@@ -920,8 +974,15 @@ _webgame.load_game = function(gametype, cb) { // {{{
 			return;
 
 		if (webgame.use_3d) {
-			// Inject a square 3-D object for generating objects without a model. {{{
-			var square = '{"meta": {"jta_version": [0.1]}, "attributes": [{"vertices": {"position": {"type": "Array", "hint": "Float16Array", "item": 3, "data": "ADgAuAAAALgAOAAAALgAuAAAALgAuAEAADgAOAGAADgAuAGAADgAuAAAADgAOAAAALgAOAAAALgAuAEAALgAOAEAADgAOAGA"}, "tcoords": [{"type": "Array", "hint": "Float16Array", "item": 2, "data": "ADyNBo8GADyNBpEGADyNBo8GADyNBpEGADyNBgA8ADyPBgA8ADyNBgA8ADyPBgA8"}]}, "polygons": {"type": "Array", "hint": "Uint16Array", "item": 1, "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsA"}}], "models": {"Plane": {"parent": null, "extra": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": -0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "smooth_normals": false}, "state": {"world_matrix": {"type": "Array", "hint": "Float16Array", "item": 4, "data": "ADwAAAAAAAAAAAA8AAAAAAAAAAAAPAAAAAAAAAAAADw="}}, "struct": 0, "groups": {"default": {"start": 0, "count": 12}}}}, "packed_data": {}}';
+			// Inject a square 3-D object for generating objects without a model.
+			// Broken up into parts to avoid excessively long line, which triggers a lintian warning.
+			var square = '{"meta": {"jta_version": [0.1]}, "attributes": [{"vertices": {"position": {"type": "Array", "hint": "Float16Array", "item": 3, ' +
+				'"data": "ADgAuAAAALgAOAAAALgAuAAAALgAuAEAADgAOAGAADgAuAGAADgAuAAAADgAOAAAALgAOAAAALgAuAEAALgAOAEAADgAOAGA"}, ' +
+				'"tcoords": [{"type": "Array", "hint": "Float16Array", "item": 2, "data": "ADyNBo8GADyNBpEGADyNBo8GADyNBpEGADyNBgA8ADyPBgA8ADyNBgA8ADyPBgA8"}]}, ' +
+				'"polygons": {"type": "Array", "hint": "Uint16Array", "item": 1, "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsA"}}], ' +
+				'"models": {"Plane": {"parent": null, "extra": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": -0.0, "z": 0.0}, ' +
+				'"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "smooth_normals": false}, "state": {"world_matrix": {"type": "Array", "hint": "Float16Array", "item": 4, ' +
+				'"data": "ADwAAAAAAAAAAAA8AAAAAAAAAAAAPAAAAAAAAAAAADw="}}, "struct": 0, "groups": {"default": {"start": 0, "count": 12}}' + '}}, "packed_data": {}}';
 			please.media.assets['square'] = please.gl.__jta_model(square, 'square');
 		}
 
@@ -985,7 +1046,7 @@ _webgame.load_game = function(gametype, cb) { // {{{
 			script.src = scripts[index];
 		};
 		if (_webgame.games[current].script.length == 0) {
-			// There are no script; probably a useless game, but we shouldn't crash on it.
+			// There are no scripts; probably a useless game, but we shouldn't crash on it.
 			console.warn("Game has no scripts; it probably won't do anything");
 			_webgame.setup_mgrl();
 		}
@@ -1119,22 +1180,7 @@ window.AddEvent('mgrl_dom_context_changed', function() { // {{{
 }); // }}}
 
 _webgame.set_language = function(language) { // {{{
-	_webgame.current_reply = function(reply) {
-		_webgame.language = reply[0];
-		_webgame.system_translations = reply[1];
-		_webgame.game_translations = reply[2];
-		_webgame.settings_translations = reply[3];
-		for (var e in _translatable)
-			for (var k = 0; k < _translatable[e].length; ++k)
-				_translatable[e][k].ClearAll().AddText(_(e));
-		_webgame.update_settings_translations();
-		_webgame.select_game();
-		if (current === null)
-			document.title = _(_webgame.gametitle);
-		else
-			document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), _(Public.name), _(_webgame.gametitle));
-		_webgame.update_url();
-	};
+	_webgame.current_reply = function(reply) { _webgame.translations.apply(_webgame, reply); };
 	server('webgame', 'language', language);
 }; // }}}
 
@@ -1408,8 +1454,8 @@ _webgame.finish = function(name, args) { // {{{
 		// Fire watch events.
 		for (var w = 0; w < fire.length; ++w) {
 			var cb = fire[w][0];
-			var old_value = watch[w][1];
-			var new_value = watch[w][2];
+			var old_value = fire[w][1];
+			var new_value = fire[w][2];
 			cb(new_value, old_value, args);
 		}
 		if (name !== undefined && name !== null && game['update_' + name] !== undefined)
@@ -1437,7 +1483,7 @@ _webgame.finish = function(name, args) { // {{{
 				webgame.viewport = game.viewport;
 			please.renderer.overlay.RemoveClass('hidden');
 			_webgame.game.RemoveClass('hidden');
-			document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), _(Public.name), _(_webgame.gametitle));
+			document.title = _('$1: $2 - $3')(_(_webgame.games[current].name), Public.name, _(_webgame.gametitle));
 			document.getElementById('gamename').ClearAll().AddText(Public.name);
 			if (window.camera !== undefined)
 				_webgame.resize_window();

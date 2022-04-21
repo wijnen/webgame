@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: 0.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2021-08-13 09:48+0200\n"
+"POT-Creation-Date: 2022-04-22 01:33+0200\n"
 "PO-Revision-Date: 2021-08-10 20:13+0200\n"
 "Last-Translator: Bas Wijnen <wijnen@debian.org>\n"
 "Language-Team: Dutch <nl@li.org>\n"
@@ -45,46 +45,50 @@ msgid "3-D"
 msgstr "3D"
 
 #: standaardinvoer:8
+msgid "Owner:"
+msgstr "Eigenaar:"
+
+#: standaardinvoer:9
 msgid "None"
 msgstr "Geen"
 
-#: standaardinvoer:9
+#: standaardinvoer:10
 msgid "Claim"
 msgstr "Aanvragen"
 
-#: standaardinvoer:10
-msgid "Release"
-msgstr "Opzeggen"
-
 #: standaardinvoer:11
+msgid "Release"
+msgstr "Vrijgeven"
+
+#: standaardinvoer:12
 msgid "Leave"
 msgstr "Verlaten"
 
-#: standaardinvoer:12
+#: standaardinvoer:13
 msgid "Players"
 msgstr "Spelers"
 
-#: standaardinvoer:13
+#: standaardinvoer:14
 msgid "Viewers"
 msgstr "Kijkers"
 
-#: standaardinvoer:14
+#: standaardinvoer:15
 msgid "Running Games"
 msgstr "Actieve spellen"
 
-#: standaardinvoer:15
+#: standaardinvoer:16
 msgid "Join"
 msgstr "Meedoen"
 
-#: standaardinvoer:16
+#: standaardinvoer:17
 msgid "Watch"
 msgstr "Kijken"
 
-#: standaardinvoer:17 standaardinvoer:18
+#: standaardinvoer:18 standaardinvoer:19
 msgid "Create New Game"
 msgstr "Maak nieuw spel"
 
-#: standaardinvoer:19
+#: standaardinvoer:20
 msgid "Next"
 msgstr "Volgende"
 
@@ -93,40 +97,40 @@ msgid "Ignoring invalid watch path $1, must start with Public or Private"
 msgstr ""
 "Poging om pad $1 to volgen genegeerd, moet beginnen met Public of Private"
 
-#: html/webgame.js:417
+#: html/webgame.js:434
 msgid "Error: server calls $1 during title game"
 msgstr "Fout: server roept $1 aan tijdens titel"
 
-#: html/webgame.js:426
+#: html/webgame.js:442
 msgid "Error: server calls $1, which is undefined"
 msgstr "Fout: server roept niet bestaande functie $1 aan"
 
 #. Set new window title.
-#: html/webgame.js:587 html/webgame.js:1125 html/webgame.js:1434
+#: html/webgame.js:603 html/webgame.js:658 html/webgame.js:1486
 msgid "$1: $2 - $3"
 msgstr "$1: $2 - $3"
 
-#: html/webgame.js:734
+#: html/webgame.js:796
 msgid "$1's game"
 msgstr "Spel van $1"
 
-#: html/webgame.js:1003
+#: html/webgame.js:1074
 msgid "Game ended. Result: $1"
 msgstr "Het spel is afgelopen. Resultaat: $1"
 
-#: html/webgame.js:1015
+#: html/webgame.js:1086
 msgid "Server replied: $1"
 msgstr "Server antwoordt: $1"
 
-#: html/webgame.js:1317 html/webgame.js:1358
+#: html/webgame.js:1368 html/webgame.js:1409
 msgid "Kick"
 msgstr "Verwijderen"
 
-#: html/webgame.js:1322
+#: html/webgame.js:1373
 msgid "Swap"
 msgstr "Wisselen"
 
-#: html/webgame.js:1332
+#: html/webgame.js:1383
 msgid "(not connected)"
 msgstr "(niet verbonden)"
 
@@ -135,105 +139,116 @@ msgstr "(niet verbonden)"
 msgid "Language Name"
 msgstr "Nederlands"
 
-#: webgame:583
+#: webgame:587
 msgid "Game Name"
 msgstr "Spelnaam"
 
-#: webgame:588
+#: webgame:592
 msgid "Number of Players"
 msgstr "Aantal spelers"
 
-#: webgame:1101
-msgid "Function $1 called with keyword arguments: $2"
-msgstr "Functie $1 aangeroepen met keyword-argumenten: $2"
-
-#: webgame:1103
+#: webgame:1120
 msgid "incorrect number of arguments to function $1 (given $2, expected $3)"
 msgstr "verkeerd aantal argumenten voor $1 (gegeven $2, verwacht $3)"
 
-#: webgame:1105
+#: webgame:1123
+msgid "invalid keyword argument(s) $2 given to function $1"
+msgstr "verkeerde benoemde argument(en) $2 gegeven aan functie $1"
+
+#: webgame:1125
 msgid "incorrect argument type given to function $1"
 msgstr "verkeerd argumenttype gegeven aan functie $1"
 
-#: webgame:1266 webgame:1270
+#: webgame:1127
+msgid "incorrect keyword argument type given to function $1"
+msgstr "verkeerd benoemd argumenttype gegeven aan functie $1"
+
+#: webgame:1296
 msgid "no game name specified"
 msgstr "er was geen naam opgegeven"
 
-#: webgame:1274
+#: webgame:1300
+msgid "no game type specified"
+msgstr "er was geen speltype opgegeven"
+
+#: webgame:1304
 msgid "game type does not exist"
 msgstr "het speltype bestaat niet"
 
-#: webgame:1284
+#: webgame:1314
 msgid "game doesn't exist"
 msgstr "het spel bestaat niet"
 
-#: webgame:1293
+#: webgame:1323
 msgid "no more players allowed"
 msgstr "er kunnen niet meer spelers bij"
 
-#: webgame:1307
+#: webgame:1341
 msgid "invalid player number to return to"
 msgstr "ongeldig spelernummer om naar terug te keren"
 
-#: webgame:1329
+#: webgame:1363
 msgid "Impossible command"
 msgstr "Onmogelijk commando"
 
-#: webgame:1354
+#: webgame:1392
 msgid "invalid admin command"
 msgstr "Ongeldig admin commando"
 
-#: webgame:1378
+#: webgame:1416
 msgid "Cannot leave from title"
 msgstr "Titel kan niet verlaten worden"
 
-#: webgame:1405
+#: webgame:1443
 msgid "Cannot claim ownership without being in a game"
 msgstr "Kan geen eigenaar worden zonder in een spel te zijn"
 
-#: webgame:1407
+#: webgame:1445
 msgid "Cannot force ownership release"
 msgstr "Kan eigenaarschap niet afpakken"
 
-#: webgame:1411
+#: webgame:1449
 msgid "Cannot release ownership without being in a game"
 msgstr "Kan eigenaarschap niet opgeven zonder in een spel te zijn"
 
-#: webgame:1413
+#: webgame:1451
 msgid "Cannot release without ownership"
 msgstr "Kan eigenaarschap niet opgeven zonder eigenaar te zijn"
 
-#: webgame:1417
+#: webgame:1455
 msgid "Kick requires a string argument"
 msgstr "Kick moet een string als argument hebben"
 
-#: webgame:1419
+#: webgame:1457
 msgid "Cannot kick players without being in a game"
 msgstr "Kan spelers niet uit het spel zetten zonder in een spel te zijn"
 
-#: webgame:1421
+#: webgame:1459
 msgid "Cannot kick without ownership"
 msgstr "Kan spelers niet uit het spel zetten zonder eigenaar te zijn"
 
-#: webgame:1423
+#: webgame:1461
 msgid "Cannot kick yourself"
 msgstr "Kan jezelf niet uit het spel zetten"
 
-#: webgame:1425
+#: webgame:1463
 msgid "That player is not in this game"
 msgstr "Die speler is niet aanwezig in dit spel"
 
-#: webgame:1431
+#: webgame:1469
 msgid "Watchers cannot swap with players"
 msgstr "Kijkers kunnen niet wisselen met spelers"
 
-#: webgame:1441
+#: webgame:1479
 msgid "There is no disconnected player to swap with"
 msgstr "Er is geen vrije plaats om naartoe te wisselen"
 
-#: webgame:1448
+#: webgame:1486
 #, python-format
 msgid "Cannot swap without ownership (num = %d, owner = %d)"
 msgstr ""
 "Kan eigenaarschap niet opgeven zonder eigenaar te zijn (num = %d, eigenaar = "
 "%d)"
+
+#~ msgid "Function $1 called with keyword arguments: $2"
+#~ msgstr "Functie $1 aangeroepen met keyword-argumenten: $2"

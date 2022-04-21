@@ -600,7 +600,7 @@ def parse_settings(settings, gamename): # {{{
 # }}}
 
 # Read info for all games. {{{
-gamedirs = set(os.path.realpath(x) for x in fhs.read_data('games', dir = True, multiple = True))
+gamedirs = set(os.path.realpath(x) for x in fhs.read_data('webgames', dir = True, multiple = True))
 log('game dirs: %s' % repr(gamedirs))
 files = []
 for d in gamedirs:
@@ -704,7 +704,7 @@ for gamedir in files:
 					loader[t].append({'type': base, 'object': objname, 'path': p['pathname']})
 
 	if settings_use_3d is None:
-		log('use 3d {}: {}'.format(gamename, have_3d))
+		#log('use 3d {}: {}'.format(gamename, have_3d))
 		if not any(have_3d.values()) or all(have_3d.values()):
 			use3d = None
 		elif have_3d[False]:
@@ -718,9 +718,9 @@ for gamedir in files:
 
 	js = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'js') and not os.path.isdir(os.path.join(jssrc, x))]
 	css = [x for x in os.listdir(jssrc) if x.endswith(os.extsep + 'css') and not os.path.isdir(os.path.join(jssrc, x))]
-	scripts = ['games/{}/{}'.format(name, f) for f in js]
+	scripts = ['webgames/{}/{}'.format(name, f) for f in js]
 	scripts.sort()
-	styles = ['games/{}/{}'.format(name, f) for f in css]
+	styles = ['webgames/{}/{}'.format(name, f) for f in css]
 	styles.sort()
 	# }}}
 
@@ -1185,28 +1185,30 @@ class Connection: # {{{
 		self._socket.closed = self._closed
 		self._socket.groups.add(title_game.game.Public.name)
 		# Handle requested languages.
-		accept_languages = self._socket.data.get('accept-language')
-		accept = [] if accept_languages is None else [x.split(';')[0].replace('-', '_') for x in accept_language.split(',')]
-		log(accept)
-		language = socket.data['query'].get('language')
+		accept_languages = self._socket.data['headers'].get('accept-language')
+		accept = [] if accept_languages is None else [x.split(';')[0].replace('-', '_') for x in accept_languages.split(',')]
+		#log(accept)
+		language = socket.data['query'].get('lang')
+		#log(language)
 		if language is not None:
-			if language in accept:
-				accept.remove(language)
-			accept.insert(0, socket.data['query']['language'])
+			for lang in language[::-1]:
+				if lang in accept:
+					accept.remove(lang)
+				accept.insert(0, lang)
 		for a in accept:
 			if a in languages:
-				lang = a
+				self.language = a
 				break
-			lang = a.split('_')[0]
-			if lang in languages:
+			self.language = a.split('_')[0]
+			if self.language in languages:
 				break
 		else:
-			lang = ''
-		log(languages)
-		log(lang)
+			self.language = ''
+		#log(languages)
+		#log(self.language)
 		# Inform about state.
 		self._socket.webgame.event('id', self._name, None)
-		self._socket.webgame.event('init', lang, languages, (translations[''][lang] if lang != '' else {}), _settings, build_settings_translations(lang))
+		self._socket.webgame.event('init', self.language, languages, (translations[''][self.language] if self.language != '' else {}), _settings, build_settings_translations(self.language))
 		broadcast_shared(self, ['Public'], self._instance.game.Public)
 		broadcast_shared(self, ['Private'], None, title_game.game.Public.name)
 	def _closed(self):
@@ -1326,6 +1328,10 @@ class Title: # Class for title game object. {{{
 				connection._socket.groups.remove(self.Public.name)
 				connection._socket.groups.add(cmd['args'][0])
 				connection._socket.webgame.event('id', connection._name, connection._num)
+				g = connection._instance.gametype
+				t = translations[g].get(connection.language, {})
+				if connection.language != '':
+					connection._socket.webgame.event('translations', connection.language, translations[''][connection.language], t, build_settings_translations(connection.language))
 				# Private must be sent before Public, because when Public.name is set, all shared variables must be available.
 				broadcast_shared(connection, ['Private'], connection._instance.game.Private[connection._num])
 				broadcast_shared(connection, ['Public'], connection._instance.game.Public)
